@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { getCases, SEVERITIES, type EmergencyCase } from '../../api/emergencies'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge } from '../../components/ui/StatusBadge'
+import { BloodRequestForm } from '../../features/emergencies/BloodRequestForm'
 import { CaseStatusLabel } from '../../features/emergencies/CaseStatusLabel'
 import { describeNeed, SEVERITY_TONE } from '../../features/emergencies/emergencies'
 import styles from '../../features/emergencies/Emergencies.module.css'
@@ -14,20 +15,30 @@ import { useLoad } from '../../lib/useLoad'
 import { StaffDataState } from './StaffDataState'
 import pageStyles from './StaffPages.module.css'
 
-/** Emergency cases at the user's hospital, and opening a new one (stories #30, #32). The server orders the list (#31). */
+/**
+ * Emergency cases at the user's hospital, opening a new one (stories #30, #32), a quick blood request (#36), and
+ * the network feed. The server orders the list (#31).
+ */
 export default function EmergenciesPage() {
   const { role } = useStaff()
   const { result, setData } = useLoad(getCases)
   const [creating, setCreating] = useState(false)
+  const [requesting, setRequesting] = useState(false)
   const [opened, setOpened] = useState<string>()
   const newCase = useRef<HTMLButtonElement>(null)
   const wasCreating = useRef(false)
+  const requestBlood = useRef<HTMLButtonElement>(null)
+  const wasRequesting = useRef(false)
 
-  // When the form closes (opened or cancelled), put focus back on the button that opened it.
+  // When a form closes (opened or cancelled), put focus back on the button that opened it.
   useEffect(() => {
     if (wasCreating.current && !creating) newCase.current?.focus()
     wasCreating.current = creating
   }, [creating])
+  useEffect(() => {
+    if (wasRequesting.current && !requesting) requestBlood.current?.focus()
+    wasRequesting.current = requesting
+  }, [requesting])
 
   if (result.state !== 'ready') return <StaffDataState failed={result.state === 'failed'} />
 
@@ -48,23 +59,33 @@ export default function EmergenciesPage() {
   return (
     <div className={pageStyles.stack}>
       {creating && <NewCaseForm onCreated={handleCreated} onClose={() => setCreating(false)} />}
+      {requesting && <BloodRequestForm onClose={() => setRequesting(false)} />}
       <Panel
         title="Emergency cases"
         aside={
-          editable &&
-          !creating && (
-            <button
-              ref={newCase}
-              type="button"
-              className={styles.secondaryAction}
-              onClick={() => {
-                setOpened(undefined)
-                setCreating(true)
-              }}
-            >
-              New case
-            </button>
-          )
+          <div className={styles.asides}>
+            <Link to="/staff/emergencies/feed" className={styles.navLink}>
+              Network requests
+            </Link>
+            {editable && !creating && !requesting && (
+              <>
+                <button
+                  ref={newCase}
+                  type="button"
+                  className={styles.secondaryAction}
+                  onClick={() => {
+                    setOpened(undefined)
+                    setCreating(true)
+                  }}
+                >
+                  New case
+                </button>
+                <button ref={requestBlood} type="button" className={styles.secondaryAction} onClick={() => setRequesting(true)}>
+                  Request blood
+                </button>
+              </>
+            )}
+          </div>
         }
       >
         <p role="status">{opened && `Case ${opened} is open.`}</p>

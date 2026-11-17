@@ -207,3 +207,116 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     expect(await screen.findByRole('heading', { name: 'This area is for hospital staff' })).toBeInTheDocument()
   })
 })
+
+const quickForm = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: 'Request blood' }))
+  return screen.getByRole('region', { name: 'Request blood' })
+}
+const sendRequest = (form: HTMLElement) => userEvent.click(within(form).getByRole('button', { name: 'Send request' }))
+
+describe('EmergenciesPage quick blood request (story #36)', () => {
+  it('sends one blood need with its urgency, then opens the new case', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/emergencies')
+    const form = await quickForm()
+
+    await userEvent.click(within(form).getByRole('radio', { name: /Critical/ }))
+    await userEvent.selectOptions(within(form).getByLabelText('Blood group'), 'AB-')
+    await userEvent.selectOptions(within(form).getByLabelText('Component'), 'platelets')
+    const units = within(form).getByLabelText('Units')
+    expect(units).toHaveAttribute('type', 'number')
+    expect(units).toHaveAttribute('min', '1')
+    await userEvent.clear(units)
+    await userEvent.type(units, '3')
+    await sendRequest(form)
+
+    const reference = `EC-${new Date().getFullYear()}-0003`
+    expect(await screen.findByRole('heading', { name: reference })).toBeInTheDocument()
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')
+    expect(posts).toHaveLength(1)
+    expect(JSON.parse(String(posts[0]![1]!.body))).toEqual({
+      severity: 'critical',
+      patientRef: '',
+      items: [{ type: 'blood', group: 'AB-', component: 'platelets', quantity: 3 }],
+    })
+  })
+
+  it('won’t send until urgency is chosen and the units are a whole number from 1 to 20', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/emergencies')
+    const form = await quickForm()
+
+    await sendRequest(form)
+    expect(within(form).getByText('Choose how urgent the request is')).toBeInTheDocument()
+    expect(within(form).getByRole('alert')).toHaveTextContent('The request wasn’t sent. Fix the fields marked below.')
+    await userEvent.click(within(form).getByRole('radio', { name: /High/ }))
+
+    const units = within(form).getByLabelText('Units')
+    for (const [typed, message] of [
+      ['0', 'Enter a whole number of 1 or more'],
+      ['2.5', 'Enter a whole number of 1 or more'],
+      ['21', 'At most 20 units per request; send another request for more'],
+    ] as const) {
+      await userEvent.clear(units)
+      await userEvent.type(units, typed)
+      await sendRequest(form)
+      expect(within(form).getByText(message)).toBeInTheDocument()
+    }
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  })
+
+  it('shows the server’s error on the field it belongs to', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/emergencies')
+    const form = await quickForm()
+    await userEvent.click(within(form).getByRole('radio', { name: /Moderate/ }))
+
+    vi.restoreAllMocks()
+    mockApi({
+      'GET /auth/me/': { body: userFor('doctor') },
+      'POST /emergencies/': fail(400, { items: { '0': { component: ['"bogus" is not a valid choice.'] } } }),
+    })
+    await sendRequest(form)
+
+    expect(await within(form).findByText('"bogus" is not a valid choice.')).toBeInTheDocument()
+    expect(within(form).getByLabelText('Component')).toHaveAccessibleDescription('"bogus" is not a valid choice.')
+    expect(within(form).getByRole('alert')).toHaveTextContent('The request wasn’t sent. Fix the fields marked below.')
+  })
+
+  it('says so when the hospital’s system is down, and keeps the form for another try', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/emergencies')
+    const form = await quickForm()
+    await userEvent.click(within(form).getByRole('radio', { name: /Low/ }))
+
+    vi.restoreAllMocks()
+    mockApi({ 'POST /emergencies/': fail(503) })
+    await sendRequest(form)
+
+    expect(await within(form).findByText('The hospital’s system didn’t respond, so the request wasn’t sent. Try again.')).toBeInTheDocument()
+    expect(within(form).getByRole('button', { name: 'Send request' })).toBeEnabled()
+  })
+
+  it('is offered to roles that can edit emergencies, beside “New case”', async () => {
+    for (const role of ['admin', 'doctor', 'nurse'] as const) {
+      mockStaffApi({ role })
+      const { unmount } = renderStaff('/staff/emergencies')
+      expect(await screen.findByRole('button', { name: 'Request blood' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'New case' })).toBeInTheDocument()
+      unmount()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('is not offered to view-only roles, who still see the network feed link', async () => {
+    for (const role of ['bloodBank', 'pharmacist'] as const) {
+      mockStaffApi({ role })
+      const { unmount } = renderStaff('/staff/emergencies')
+      await table()
+      expect(screen.queryByRole('button', { name: 'Request blood' })).toBeNull()
+      expect(screen.getByRole('link', { name: 'Network requests' })).toHaveAttribute('href', '/staff/emergencies/feed')
+      unmount()
+      vi.restoreAllMocks()
+    }
+  })
+})

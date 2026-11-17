@@ -85,6 +85,36 @@ class CaseSerializer(serializers.ModelSerializer):
         return (user.get_full_name() or user.email) if user else ""
 
 
+class FeedNeedSerializer(RequestItemSerializer):
+    """A need as the feed shows it: what is asked for, and how much of it is already fulfilled."""
+
+    def to_representation(self, item: RequestItem):
+        return {**super().to_representation(item), "fulfilled": item.fulfilled}
+
+
+class FeedEntrySerializer(serializers.ModelSerializer):
+    """One active request in the network feed (story #36). No `patientRef`, notes, timeline or author: the
+    feed crosses hospitals, so it carries nothing patient-related and nothing about the staff who made the
+    request. Shape of `FeedEntry` in frontend/src/api/emergencies.ts."""
+
+    hospital = serializers.SerializerMethodField()
+    createdAt = serializers.DateTimeField(source="created_at")
+    needs = FeedNeedSerializer(source="items", many=True, read_only=True)
+
+    class Meta:
+        model = EmergencyRequest
+        fields = ["reference", "hospital", "severity", "status", "createdAt", "needs"]
+
+    def get_hospital(self, case):
+        return {"id": case.hospital_id, "name": case.hospital.name} if case.hospital else None
+
+
+class FeedQuerySerializer(serializers.Serializer):
+    """GET /api/emergencies/feed/?type=: which needs the feed lists. Blood is the default."""
+
+    type = serializers.ChoiceField(choices=ResourceType.choices, default=ResourceType.BLOOD)
+
+
 class CaseActionSerializer(serializers.Serializer):
     """POST /api/emergencies/<reference>/actions/: one move along the lifecycle, with an optional note."""
 

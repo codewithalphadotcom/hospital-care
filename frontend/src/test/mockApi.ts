@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
-import type { CaseAction, CaseInput, EmergencyCase, EmergencyCaseDetail, Severity, StatusChange } from '../api/emergencies'
+import type { CaseAction, CaseInput, CaseStatus, EmergencyCase, EmergencyCaseDetail, FeedEntry, Severity, StatusChange } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
@@ -11,13 +11,13 @@ import { actionsFor, nextStatus, STATUS_LABEL } from '../features/emergencies/em
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
-import { sampleCases, sampleLocalAvailable } from './fixtures/emergencies'
+import { sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
 import { sampleMedicines } from './fixtures/pharmacy'
 import { samplePublicStatus } from './fixtures/publicStatus'
 
 export type Reply = { status?: number; body?: unknown }
-type Request = { params: Record<string, string>; body: unknown }
+type Request = { params: Record<string, string>; body: unknown; query: URLSearchParams }
 type Route = Reply | ((request: Request) => Reply)
 
 export const ok = (body?: unknown): Reply => ({ status: 200, body })
@@ -42,14 +42,15 @@ function match(pattern: string, path: string): Record<string, string> | null {
  */
 export function mockApi(routes: Record<string, Route>) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const path = new URL(String(input)).pathname.replace(/^\/api/, '')
+    const url = new URL(String(input))
+    const path = url.pathname.replace(/^\/api/, '')
     const method = (init?.method ?? 'GET').toUpperCase()
     for (const [key, route] of Object.entries(routes)) {
       const [routeMethod, pattern] = key.split(' ')
       const params = routeMethod === method ? match(pattern, path) : null
       if (!params) continue
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
-      const reply = typeof route === 'function' ? route({ params, body }) : route
+      const reply = typeof route === 'function' ? route({ params, body, query: url.searchParams }) : route
       const status = reply.status ?? 200
       return new Response(status === 204 ? null : JSON.stringify(reply.body ?? {}), { status })
     }
@@ -60,8 +61,21 @@ export function mockApi(routes: Record<string, Route>) {
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, moderate: 2, low: 3 }
 
 /** The order the server lists cases in: most severe first, then the oldest case first (story #31). */
-const byPriority = (a: EmergencyCase, b: EmergencyCase) =>
+const byPriority = (a: Pick<EmergencyCase, 'severity' | 'createdAt'>, b: Pick<EmergencyCase, 'severity' | 'createdAt'>) =>
   SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.createdAt.localeCompare(b.createdAt)
+
+/** The statuses the network feed lists (story #36). */
+const FEED_STATUSES: readonly CaseStatus[] = ['open', 'matching', 'partiallyFulfilled', 'escalated']
+
+/** A case as the network feed lists it: the same request, with nothing filled yet. */
+const feedEntryOf = (c: EmergencyCase): FeedEntry => ({
+  reference: c.id,
+  hospital: c.hospital,
+  severity: c.severity,
+  status: c.status,
+  createdAt: c.createdAt,
+  needs: c.items.map((need) => ({ ...need, fulfilled: 0 })),
+})
 
 /** What the server fills in for a new structure item. */
 const STRUCTURE_DEFAULTS: Record<StructureKind, Record<string, unknown>> = {
@@ -102,6 +116,8 @@ type StaffApiOptions = {
   cases?: EmergencyCase[]
   /** Replace a case's timeline (by reference), e.g. to show an entry the system made. */
   histories?: Record<string, StatusChange[]>
+  /** Use this network feed instead of the sample one, which is these cases plus another hospital's requests. */
+  feed?: FeedEntry[]
 }
 
 export function mockStaffApi({
@@ -112,6 +128,7 @@ export function mockStaffApi({
   networkDown = false,
   cases: customCases,
   histories: customHistories,
+  feed: customFeed,
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -243,6 +260,18 @@ export function mockStaffApi({
       histories.set(created.id, [openingEntry(created)])
       cases.sort(byPriority)
       return { status: 201, body: created }
+    }),
+    // Before /emergencies/:reference/, which would otherwise match "feed".
+    'GET /emergencies/feed/': view('emergencies', ({ query }) => {
+      const type = query.get('type') ?? 'blood'
+      if (type !== 'blood' && type !== 'bed') return fail(400, { type: ['Use one of: blood, bed.'] })
+      const entries = customFeed ?? [...cases.map(feedEntryOf), ...sampleNetworkRequests(now)]
+      const listed = entries
+        .filter((entry) => FEED_STATUSES.includes(entry.status))
+        .map((entry) => ({ ...entry, needs: entry.needs.filter((need) => need.type === type) }))
+        .filter((entry) => entry.needs.length > 0)
+        .sort(byPriority)
+      return ok(listed)
     }),
     'GET /emergencies/:reference/': view('emergencies', ({ params }) => {
       const found = findCase(params.reference)

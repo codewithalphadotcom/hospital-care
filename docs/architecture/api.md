@@ -117,6 +117,7 @@ Users at a hospital see only its cases (another hospital's case → **404**); st
 | POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
 | GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions`, `outcome` and local availability. Escalates overdue cases first (#35) | #30, #33, #34, #35 |
 | POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
+| GET | `/emergencies/feed/?type=blood\|bed` | – | `FeedEntry[]`: every hospital's active requests of that type, most urgent first, at most 100. Escalates overdue cases first (#35) | #36 |
 
 ```ts
 EmergencyCase = {
@@ -140,6 +141,9 @@ RequestItem = { type: 'blood', group: BloodGroup, component: Component, quantity
   case first within a level (the case waiting longest is handled first). The server does the sort; clients render
   the order they receive. Ties (same severity and time) fall back to id. Cases from before #31 were renamed:
   `urgent` → `high`, `routine` → `moderate`.
+- A blood request is a case with one blood need. Send it through `POST /emergencies/` with `severity` as its urgency
+  and `items: [{type: 'blood', group, component, quantity}]`. It gets the same validation, reference, timeline,
+  audit record and escalation as any case. See [Network request feed](#network-request-feed-36).
 - No patient-identifying data is collected: `patientRef` is optional.
 - Errors on one need come back keyed by its position: `{"items": {"0": {"quantity": ["..."]}}}`. An empty or
   over-long list is `{"items": ["..."]}`.
@@ -255,6 +259,41 @@ EmergencyCaseDetail = EmergencyCase & {
   outcome: string | null        // the note of the close entry; null until the case is closed
 }
 ```
+
+## Network request feed (#36)
+
+`GET /emergencies/feed/` lists the network's active requests so that a blood bank at another hospital can see what is
+wanted. Module `emergencies`: every role that can see emergencies can read it (admin, doctor, nurse, blood bank,
+pharmacist). Patients and signed-out users get **403**. It is not limited to the user's own hospital; that is the point.
+
+Query: `type` is `blood` (default) or `bed`. Any other value is **400** `{"type": ["..."]}`.
+
+```ts
+FeedEntry = {
+  reference: string,            // "EC-2026-0001"
+  hospital: { id: number, name: string } | null,
+  severity: 'critical' | 'high' | 'moderate' | 'low',
+  status: 'open' | 'matching' | 'partiallyFulfilled' | 'escalated',
+  createdAt: string,            // ISO time; the client shows its age
+  needs: FeedNeed[]             // only the needs of the requested type
+}
+FeedNeed = { type: 'blood', group, component, quantity: number, fulfilled: number }
+         | { type: 'bed', bedType, quantity: number, fulfilled: number }
+```
+
+- **Included:** cases in status `open`, `matching`, `partiallyFulfilled` or `escalated`, from every hospital (and cases
+  with no hospital), that have at least one need of the requested type. Each entry lists only those needs.
+- **Excluded:** `fulfilled`, `closed` and `cancelled` cases, and cases with no need of the requested type.
+- **Order:** severity (critical first), then the oldest case first, then id. The same order as the case list.
+- **Limit:** the first 100 entries. There is no paging yet (a ponytail in `views.py`).
+- **Escalation:** the feed runs the same request-time sweep as the list and the detail (#35), so an overdue critical
+  case appears here already `escalated`.
+- **Not included, on purpose:** `patientRef`, notes, the timeline, `outcome`, and who created the case (`createdBy`).
+  The feed crosses hospitals, so it carries no patient-related data and nothing about staff at another hospital.
+  The case's own page (`GET /emergencies/<id>/`) is still limited to its hospital, so a link to another hospital's case
+  is a 404. The client links only the user's own hospital's entries.
+- **Queries:** a fixed number, whatever the number of cases: the sweep's check, the cases with their hospitals, and
+  their needs.
 
 ## Demo data
 

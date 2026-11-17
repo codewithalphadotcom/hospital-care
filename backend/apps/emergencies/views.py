@@ -1,4 +1,4 @@
-from django.db.models import Prefetch
+from django.db.models import Exists, OuterRef, Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.permissions import AllowAny
@@ -10,9 +10,22 @@ from apps.hospitals.models import DoctorShift
 from apps.hospitals.serializers import DoctorSerializer
 from apps.resources.state_machine import TransitionNotAllowed
 
-from .models import EmergencyRequest, EmergencyStatus, RequestStatusChange
-from .serializers import CaseActionSerializer, CaseDetailSerializer, CaseInputSerializer, CaseSerializer
-from .services import OutcomeNoteRequired, apply_case_action, create_case, escalate_overdue
+from .models import EmergencyRequest, EmergencyStatus, RequestItem, RequestStatus, RequestStatusChange
+from .serializers import (
+    CaseActionSerializer,
+    CaseDetailSerializer,
+    CaseInputSerializer,
+    CaseSerializer,
+    FeedEntrySerializer,
+    FeedQuerySerializer,
+)
+from .services import ACTIVE, OutcomeNoteRequired, apply_case_action, create_case, escalate_overdue
+
+# Story #36: what the network feed lists. Active cases, and escalated ones (still waiting for blood).
+FEED_STATUSES = (*ACTIVE, RequestStatus.ESCALATED)
+# ponytail: the first 100 by urgency, no paging. Ceiling: a network with more than 100 active requests of one
+# type sees only the first 100; add paging when that happens.
+FEED_LIMIT = 100
 
 
 def case_queryset():
@@ -77,6 +90,29 @@ class CaseDetailView(APIView):
         escalate_overdue()  # Story #35: the same request-time sweep as the list.
         case = get_object_or_404(own_hospital(case_detail_queryset(), request.user), reference=reference)
         return Response(CaseDetailSerializer(case).data)
+
+
+class EmergencyFeedView(APIView):
+    """GET /api/emergencies/feed/?type=blood|bed → the network's active requests, most urgent first (#36).
+    Every hospital's, not only the user's: a blood bank elsewhere has to see them. Blood is the default. Each
+    entry lists only the needs of that type. Emergencies: view, for every role that can see the module."""
+
+    permission_classes = [module_permission("emergencies")]
+
+    def get(self, request):
+        escalate_overdue()  # Story #35: the same request-time sweep as the list.
+        query = FeedQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        kind = query.validated_data["type"]
+        needs = RequestItem.objects.filter(request=OuterRef("pk"), resource_type=kind)
+        cases = (
+            EmergencyRequest.objects.filter(status__in=FEED_STATUSES)
+            .filter(Exists(needs))
+            .select_related("hospital")
+            .prefetch_related(Prefetch("items", queryset=RequestItem.objects.filter(resource_type=kind)))
+            .by_priority()[:FEED_LIMIT]
+        )
+        return Response(FeedEntrySerializer(cases, many=True).data)
 
 
 class CaseActionView(APIView):

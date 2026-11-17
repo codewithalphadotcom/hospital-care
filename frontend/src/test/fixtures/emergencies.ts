@@ -1,4 +1,4 @@
-import type { EmergencyCase } from '../../api/emergencies'
+import type { EmergencyCase, FeedEntry } from '../../api/emergencies'
 
 /**
  * What CityCare General has free for each sample case's needs, in item order (story #33). EC-2026-0002 is short
@@ -36,6 +36,44 @@ export function sampleCases(now: Date): EmergencyCase[] {
       createdBy: 'Hina Javed',
       createdAt: minutesAgo(180),
       items: [{ type: 'bed', bedType: 'general', quantity: 2 }],
+    },
+  ]
+}
+
+/**
+ * Active requests at another hospital, Riverside Medical Centre, as the network feed lists them (story #36). Their
+ * ids are not CityCare's, so the feed shows them without a link.
+ */
+export function sampleNetworkRequests(now: Date): FeedEntry[] {
+  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString()
+  const hospital = { id: 2, name: 'Riverside Medical Centre' }
+  return [
+    {
+      reference: 'EC-2026-0007',
+      hospital,
+      severity: 'critical',
+      status: 'matching',
+      createdAt: minutesAgo(40),
+      needs: [{ type: 'blood', group: 'O-', component: 'redCells', quantity: 6, fulfilled: 2 }],
+    },
+    {
+      reference: 'EC-2026-0008',
+      hospital,
+      severity: 'high',
+      status: 'escalated',
+      createdAt: minutesAgo(200),
+      needs: [
+        { type: 'blood', group: 'AB+', component: 'platelets', quantity: 1, fulfilled: 0 },
+        { type: 'bed', bedType: 'icu', quantity: 1, fulfilled: 0 },
+      ],
+    },
+    {
+      reference: 'EC-2026-0009',
+      hospital,
+      severity: 'moderate',
+      status: 'open',
+      createdAt: minutesAgo(15),
+      needs: [{ type: 'bed', bedType: 'general', quantity: 2, fulfilled: 0 }],
     },
   ]
 }

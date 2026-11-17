@@ -30,6 +30,25 @@ export interface CaseInput {
   items: Need[]
 }
 
+/** One need in the network feed: what is asked for, and how much of it is already filled (story #36). */
+export type FeedNeed = Need & { fulfilled: number }
+
+/**
+ * An active request in the network feed (story #36), from any hospital. Shape of `FeedEntry` in
+ * backend/apps/emergencies/serializers.py. It carries no patient data, notes, timeline or author.
+ */
+export interface FeedEntry {
+  reference: string
+  hospital: { id: number; name: string } | null
+  severity: Severity
+  status: CaseStatus
+  createdAt: string
+  /** Only the needs of the type the feed was asked for. */
+  needs: FeedNeed[]
+}
+
+export type FeedType = 'blood' | 'bed'
+
 /** A move along the lifecycle (story #34). The names match REQUEST_LIFECYCLE in backend/apps/emergencies/models.py. */
 export type CaseAction = 'startMatching' | 'partiallyFulfil' | 'fulfil' | 'escalate' | 'resumeMatching' | 'close' | 'cancel'
 
@@ -94,4 +113,12 @@ export function getCase(reference: string): Promise<EmergencyCaseDetail> {
 /** Move a case. POST /api/emergencies/<reference>/actions/ (emergencies: edit). 409 if the move isn't allowed now. */
 export function postCaseAction(reference: string, action: CaseAction, note: string): Promise<EmergencyCaseDetail> {
   return apiPost<EmergencyCaseDetail>(`/emergencies/${encodeURIComponent(reference)}/actions/`, { action, note })
+}
+
+/**
+ * Active requests from every hospital, most urgent first, with their needs of one type. GET /api/emergencies/feed/
+ * (emergencies: view, every staff role).
+ */
+export function getFeed(type: FeedType): Promise<FeedEntry[]> {
+  return apiGet<FeedEntry[]>(`/emergencies/feed/?type=${type}`)
 }

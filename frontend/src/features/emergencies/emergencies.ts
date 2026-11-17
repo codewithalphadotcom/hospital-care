@@ -189,3 +189,54 @@ export function stepWithErrors(errors: CaseErrors): number | null {
   if (errors.severity || errors.patientRef) return 0
   return hasErrors(errors) ? 1 : null
 }
+
+// ── The quick blood request (story #36) ──────────────────────────────────────────────────────────
+
+/** The quick form's values: one blood need and its urgency. `quantity` is the raw input text. */
+export type BloodRequestValues = {
+  severity: Severity | ''
+  group: BloodGroup
+  component: Component
+  quantity: string
+}
+
+/** Field errors by field name; `form` holds a message about the request as a whole. */
+export type BloodRequestErrors = Partial<Record<'severity' | 'group' | 'component' | 'quantity' | 'form', string>>
+
+export function emptyBloodRequest(): BloodRequestValues {
+  return { severity: '', group: BLOOD_GROUPS[0], component: COMPONENTS[0].id, quantity: '1' }
+}
+
+/** Urgency is required. The quantity is a whole number from 1 to the blood limit, the same as the API's. */
+export function validateBloodRequest(values: BloodRequestValues): BloodRequestErrors {
+  const errors: BloodRequestErrors = {}
+  if (!values.severity) errors.severity = 'Choose how urgent the request is'
+  const text = values.quantity.trim()
+  const max = MAX_QUANTITY.blood
+  if (!/^\d+$/.test(text) || Number(text) < 1) errors.quantity = 'Enter a whole number of 1 or more'
+  else if (Number(text) > max) errors.quantity = `At most ${max} units per request; send another request for more`
+  return errors
+}
+
+/** A blood request is a case with one blood need (story #36). It has no patient reference. */
+export function toBloodRequest(values: BloodRequestValues): CaseInput {
+  return {
+    severity: values.severity as Severity,
+    patientRef: '',
+    items: [{ type: 'blood', group: values.group, component: values.component, quantity: Number(values.quantity.trim()) }],
+  }
+}
+
+/** A 400 from POST /emergencies/ as the quick form's field errors. The one need is item "0". */
+export function bloodRequestErrors(error: unknown): BloodRequestErrors {
+  const body = error instanceof ApiError && typeof error.body === 'object' && error.body !== null ? (error.body as Record<string, unknown>) : {}
+  const items = body.items
+  const need = typeof items === 'object' && items !== null && !Array.isArray(items) ? (items as Record<string, Record<string, unknown>>)['0'] : undefined
+  return {
+    severity: first(body.severity),
+    group: first(need?.group),
+    component: first(need?.component),
+    quantity: first(need?.quantity),
+    form: first(items),
+  }
+}
