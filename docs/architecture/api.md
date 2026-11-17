@@ -325,7 +325,8 @@ CandidateItem = {
   itemId: number,                  // the RequestItem's id
   need: string,                    // label: "O- red cells", "ICU bed", "Ventilator", "Cardiac operating room"
   shortfall: number,               // what the case's hospital cannot cover (#33)
-  candidates: Candidate[]          // covering first, then nearest, then hospital id
+  strategy: { name: string, label: string },  // how the candidates are ordered (#40), e.g. {"name": "earliestExpiry", "label": "Earliest expiry first"}
+  candidates: Candidate[]          // best first: rank 1 is the recommendation (#41)
 }
 Candidate = {
   hospital: { id: number, name: string },
@@ -334,7 +335,23 @@ Candidate = {
   distanceKm: number | null,       // straight-line, one decimal
   travelMinutes: number | null,    // estimated travel time (#39), whole minutes
   earliestExpiry?: string,         // blood only: the soonest expiry among its matching units
-  bestDonorRank?: number           // blood only: 0 is the identical group, higher is a compatible substitute
+  bestDonorRank?: number,          // blood only: 0 is the identical group, higher is a compatible substitute
+  rank: number,                    // 1-based position in the item's list (#41)
+  score: Score,                    // the breakdown of the ranking (#41)
+  recommended: boolean             // true only on rank 1, and only when its score is above 0
+}
+Score = {
+  total: number,                   // 0 to 100, one decimal: the sum of the factors' points
+  strategy: string,                // the strategy's name, as in CandidateItem.strategy.name
+  factors: ScoreFactor[]           // in the strategy's order
+}
+ScoreFactor = {
+  name: 'distance' | 'expiry' | 'quantity' | 'compatibility',
+  label: string,                   // "Distance", "Expiry", "Stock", "Blood group match"
+  value: number,                   // 0 to 1, two decimals: how well the candidate does on this factor
+  weight: number,                  // this factor's share of the strategy's weights, 0 to 1, two decimals
+  points: number,                  // one decimal, out of 100: the factor's contribution to the total
+  detail: string                   // the reason in plain words: "4.2 km, about 6 min", "expires in 3 days", "5 available, 3 needed", "identical group"
 }
 ```
 
@@ -343,8 +360,15 @@ Candidate = {
   type; operating rooms available with the capability. Each is counted per hospital.
 - **Left out:** the case's own hospital (its stock is already counted in #33), inactive hospitals, and hospitals with
   nothing matchable.
-- **Order:** covering candidates first, then the nearest (a candidate with no distance comes last), then hospital id. This
-  is deliberately plain. Scoring (#40) and ranking (#41) replace it later.
+- **Order (#41):** by total score, highest first, from the strategy for the need's type (#40: earliest expiry for blood,
+  nearest for beds, equipment and operating rooms, weights from `MATCHING_SCORING`). Ties go to the nearer candidate (no
+  distance last), then to hospital id. Covering is not a sort key: stock depth counts only through the Stock factor, so
+  a candidate that covers less can rank above one that covers more when its distance and expiry are much better. The
+  client shows this order as received.
+- **Scores (#41).** Each factor's points are rounded to one decimal before they are added, so the points shown add up
+  exactly to `total`. `recommended` is set on rank 1 only, and not when its total is 0 (for example, when only distance
+  counts and the hospital is beyond `MATCHING_MAX_DISTANCE_KM`). The case page shows `distanceKm` and `travelMinutes` with
+  each candidate as "4.2 km · ~6 min", or "distance unknown" when `distanceKm` is null.
 - **Distance** is `null` when the case has no hospital or either side has no coordinates.
 - **Per requirement.** Two needs can both count the same unit at another hospital. Allocation (#45) is what claims stock.
 - **Read only.** Nothing is stored, and the endpoint does not run the overdue sweep (#35).
