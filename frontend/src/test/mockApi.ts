@@ -5,7 +5,9 @@ import type {
   CandidatesResponse,
   CaseAction,
   CaseInput,
+  CaseReservation,
   CaseStatus,
+  Need,
   EmergencyCase,
   EmergencyCaseDetail,
   FeedEntry,
@@ -192,6 +194,14 @@ export function sampleOrBookings(now: Date): OrBooking[] {
   ]
 }
 
+/** A resource's name as staff see it on a hold: "O- red cells DN-0001", "Bed ICU-01", "Ventilator VENT-001", "OR 1". */
+function resourceLabel(need: Need, id: number): string {
+  if (need.type === 'blood') return `${need.group} ${need.component === 'redCells' ? 'red cells' : need.component} DN-${String(id).padStart(4, '0')}`
+  if (need.type === 'bed') return `Bed ${need.bedType.toUpperCase()}-${String(id).padStart(2, '0')}`
+  if (need.type === 'equipment') return `${need.equipmentType === 'ventilator' ? 'Ventilator' : need.equipmentType} VENT-${String(id).padStart(3, '0')}`
+  return `OR ${id}`
+}
+
 /** "+05:00"-stamped time as HH:MM, the way the server words a clash. */
 const clock = (iso: string) => iso.slice(11, 16)
 
@@ -224,10 +234,29 @@ export function mockStaffApi({
   const histories = new Map<string, StatusChange[]>(cases.map((c) => [c.id, [openingEntry(c)]]))
   for (const [reference, entries] of Object.entries(customHistories ?? {})) histories.set(reference, entries)
   const findCase = (reference: string) => cases.find((c) => c.id === reference)
-  /** The case as the server returns it: each need with what this hospital has (story #33), from the sample stock. */
+  /** Free units per need at this hospital, from the sample stock. A hold takes one unit; a release gives it back. */
+  const localStock = new Map<string, number[]>()
+  const stockOf = (c: EmergencyCase): number[] => {
+    if (!localStock.has(c.id)) localStock.set(c.id, c.items.map((_, i) => sampleLocalAvailable[c.id]?.[i] ?? 0))
+    return localStock.get(c.id)!
+  }
+  /** Each case's holds on its stock, held or ended (story #43). Each hold is one unit of one need. */
+  const holdsByCase = new Map<string, CaseReservation[]>()
+  const holdsOf = (reference: string): CaseReservation[] => {
+    if (!holdsByCase.has(reference)) holdsByCase.set(reference, [])
+    return holdsByCase.get(reference)!
+  }
+  let nextHoldId = 1
+  const heldFor = (reference: string, itemId: number) =>
+    holdsOf(reference).filter((hold) => hold.itemId === itemId && hold.status === 'held').length
+  /** The case as the server returns it: each need with what this hospital has (story #33) and its holds (story #43). */
   const detailOf = (c: EmergencyCase): EmergencyCaseDetail => {
-    const local = sampleLocalAvailable[c.id] ?? []
-    const items = c.items.map((need, i) => ({ ...need, localAvailable: local[i] ?? 0, shortfall: Math.max(0, need.quantity - (local[i] ?? 0)) }))
+    const local = stockOf(c)
+    const items = c.items.map((need, i) => {
+      const reserved = heldFor(c.id, i + 1)
+      const available = local[i] ?? 0
+      return { ...need, itemId: i + 1, localAvailable: available, shortfall: Math.max(0, need.quantity - reserved - available), reserved }
+    })
     const history = histories.get(c.id) ?? []
     const closes = history.filter((change) => change.action === 'close')
     return {
@@ -237,6 +266,7 @@ export function mockStaffApi({
       history,
       actions: actionsFor(c.status),
       outcome: closes.length ? closes[closes.length - 1].note : null,
+      reservations: holdsOf(c.id).filter((hold) => hold.status === 'held' || hold.status === 'allocated'),
     }
   }
   const equipment = sampleEquipment(now)
@@ -381,6 +411,54 @@ export function mockStaffApi({
       return ok(detailOf(found))
     }),
 
+    'POST /emergencies/:reference/reservations/': edit('emergencies', ({ params, body }) => {
+      const found = findCase(params.reference)
+      if (!found) return fail(404)
+      const { itemId, quantity } = body as { itemId: number; quantity: number }
+      const need = found.items[itemId - 1]
+      if (!need) return fail(400, { itemId: ['No need with that id on this case.'] })
+      if (!['open', 'matching', 'partiallyFulfilled', 'escalated'].includes(found.status)) {
+        return fail(400, { detail: `Can't reserve stock for a case that is ${STATUS_LABEL[found.status].toLowerCase()}.` })
+      }
+      const remaining = need.quantity - heldFor(found.id, itemId)
+      if (quantity > remaining) return fail(400, { detail: `Only ${Math.max(remaining, 0)} more can be reserved for this need.` })
+      const stock = stockOf(found)
+      const taken = Math.min(stock[itemId - 1] ?? 0, quantity)
+      if (taken === 0) return fail(400, { detail: 'No matching stock is free at this hospital.' })
+      stock[itemId - 1] -= taken
+      const hospital = found.hospital ?? { id: 0, name: '' }
+      const made: CaseReservation[] = Array.from({ length: taken }, () => {
+        const id = nextHoldId++
+        return {
+          id,
+          itemId,
+          resource: resourceLabel(need, id),
+          hospital,
+          status: 'held',
+          expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+          reservedBy: role ? NAMES[role] : '',
+        }
+      })
+      holdsOf(found.id).push(...made)
+      if (found.status === 'open') {
+        histories.set(found.id, [
+          ...(histories.get(found.id) ?? []),
+          { fromStatus: 'open', toStatus: 'matching', action: 'startMatching', note: `Stock reserved at ${hospital.name}`, actor: null, at: new Date().toISOString() },
+        ])
+        found.status = 'matching'
+      }
+      return { status: 201, body: made }
+    }),
+    'POST /emergencies/:reference/reservations/:id/release/': edit('emergencies', ({ params }) => {
+      const found = findCase(params.reference)
+      if (!found) return fail(404)
+      const hold = holdsOf(found.id).find((h) => h.id === Number(params.id))
+      if (!hold) return fail(404)
+      if (hold.status !== 'held') return fail(409, { detail: `This reservation is ${hold.status}, so it can't be released.` })
+      hold.status = 'released'
+      stockOf(found)[hold.itemId - 1] += 1
+      return ok(hold)
+    }),
     'GET /users/': view('users', () => ok(users)),
     'PATCH /users/:id/': edit('users', ({ params, body }) => {
       const user = users.find((u) => u.id === Number(params.id))

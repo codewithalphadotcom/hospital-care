@@ -173,9 +173,27 @@ export interface StatusChange {
   at: string
 }
 
-/** What the case's own hospital has for one need (story #33). Only the detail carries it. */
-export type NeedAvailability = { localAvailable: number; shortfall: number }
+/**
+ * What the case's own hospital has for one need (story #33), and the resources held for it (story #43). Only the
+ * detail carries it. `reserved` counts the holds not yet allocated.
+ */
+export type NeedAvailability = { itemId: number; localAvailable: number; shortfall: number; reserved: number }
 export type AvailableNeed = Need & NeedAvailability
+
+/** A hold on one resource for one need of a case (story #43). Shape of `ReservationSerializer`. */
+export interface CaseReservation {
+  id: number
+  /** The need this hold is for: an `itemId` of the case's items. */
+  itemId: number
+  /** As staff name it: "O− red cells DN-0042", "Bed ICU-03", "Ventilator VENT-003" or "OR 1". */
+  resource: string
+  hospital: { id: number; name: string }
+  /** Held until the hold expires or is released; allocated once the resource is confirmed (story #45). */
+  status: 'held' | 'allocated' | 'released' | 'expired'
+  expiresAt: string
+  /** The person who made the hold, or their email if they have no name. */
+  reservedBy: string
+}
 
 /**
  * A case with its timeline, the moves valid from its current status, and what its hospital has for each need
@@ -189,6 +207,8 @@ export interface EmergencyCaseDetail extends EmergencyCase {
   actions: CaseAction[]
   /** The outcome note from the close (story #35): required to close, so set once the case is closed. Else null. */
   outcome: string | null
+  /** The holds still in force on the case's stock: held and allocated (story #43). */
+  reservations: CaseReservation[]
 }
 
 export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[] = [
@@ -235,4 +255,18 @@ export function postCaseAction(reference: string, action: CaseAction, note: stri
  */
 export function getFeed(type: FeedType): Promise<FeedEntry[]> {
   return apiGet<FeedEntry[]>(`/emergencies/feed/?type=${type}`)
+}
+
+/**
+ * Hold up to `quantity` of one need's resources at the case's own hospital (story #43). Returns the holds made, which
+ * can be fewer than asked. POST /api/emergencies/<reference>/reservations/ (emergencies: edit). 400 with a `detail`
+ * when nothing is free or the need has no room left.
+ */
+export function reserveStock(reference: string, itemId: number, quantity: number): Promise<CaseReservation[]> {
+  return apiPost<CaseReservation[]>(`/emergencies/${encodeURIComponent(reference)}/reservations/`, { itemId, quantity })
+}
+
+/** Release a held reservation. POST /api/emergencies/<reference>/reservations/<id>/release/ (emergencies: edit). 409 if it isn't held. */
+export function releaseReservation(reference: string, id: number): Promise<CaseReservation> {
+  return apiPost<CaseReservation>(`/emergencies/${encodeURIComponent(reference)}/reservations/${id}/release/`, {})
 }
