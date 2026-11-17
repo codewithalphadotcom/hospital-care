@@ -65,6 +65,7 @@ class OrBookingSerializer(serializers.ModelSerializer):
     endsAt = serializers.DateTimeField(source="ends_at", read_only=True)
     patientInitials = serializers.CharField(source="patient_initials", read_only=True)
     bookedBy = serializers.CharField(source="booked_by.get_full_name", read_only=True)
+    canCancel = serializers.SerializerMethodField()
 
     class Meta:
         model = OrBooking
@@ -78,4 +79,12 @@ class OrBookingSerializer(serializers.ModelSerializer):
             "patientInitials",
             "status",
             "bookedBy",
+            "canCancel",
         ]
+
+    def get_canCancel(self, booking) -> bool:
+        """Whether the requesting user (context["user"]) may cancel it, so the page only offers what works."""
+        from .services import may_cancel  # services imports this module
+
+        user = self.context.get("user")
+        return bool(user) and booking.status == "booked" and may_cancel(user, booking)

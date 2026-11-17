@@ -89,7 +89,9 @@ class OrBookingListView(APIView):
         serializer = OrBookingCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         booking = services.book_operating_room(serializer.validated_data, actor=request.user)
-        return Response(OrBookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+        return Response(
+            OrBookingSerializer(booking, context={"user": request.user}).data, status=status.HTTP_201_CREATED
+        )
 
 
 class OrBookingCancelView(APIView):
@@ -102,4 +104,4 @@ class OrBookingCancelView(APIView):
             booking = services.cancel_operating_booking(pk, actor=request.user)
         except TransitionNotAllowed as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(OrBookingSerializer(booking).data)
+        return Response(OrBookingSerializer(booking, context={"user": request.user}).data)

@@ -143,6 +143,7 @@ export function sampleOrBookings(now: Date): OrBooking[] {
     patientInitials: 'A.K.',
     status: 'booked',
     bookedBy: 'Hina Javed',
+    canCancel: true,
   })
   return [
     slot(1, 1, '09:00', '13:00', 'CABG', 'Dr. Ayesha Khan'),
@@ -308,7 +309,9 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
           capabilities: room.capabilities,
           bookings: bookings
             .filter((b) => b.roomId === room.id && b.status === 'booked' && b.startsAt.startsWith(date))
-            .sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
+            .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+            // Same rule as the server: admins and nurses cancel any booking, others only their own.
+            .map((b) => ({ ...b, canCancel: role === 'admin' || role === 'nurse' || b.bookedBy === NAMES[role!] })),
         })),
       })
     }),
@@ -322,7 +325,7 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
       if (clash) {
         return fail(400, { startsAt: [`${room.name} is already booked from ${clock(clash.startsAt)} to ${clock(clash.endsAt)}.`] })
       }
-      const created: OrBooking = { ...input, id: nextId++, status: 'booked', bookedBy: NAMES.nurse }
+      const created: OrBooking = { ...input, id: nextId++, status: 'booked', bookedBy: NAMES.nurse, canCancel: true }
       bookings.push(created)
       return { status: 201, body: created }
     }),

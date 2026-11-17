@@ -115,6 +115,15 @@ describe('OperatingRoomSchedulePage (story #29 Operating room scheduling)', () =
     expect(within(cardiac).getByText('CABG')).toBeInTheDocument()
   })
 
+  it('a doctor can book but is not offered cancel on a colleague’s booking', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(PATH)
+    const cardiac = await room('Cardiac theatre')
+    expect(within(cardiac).getByText('CABG')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Book a slot' })).toBeInTheDocument()
+    expect(screen.queryAllByRole('button', { name: /^Cancel / })).toHaveLength(0)
+  })
+
   it('shows no book or cancel controls to a role that can only view the schedule', async () => {
     mockRoles.bookingEdit = false
     mockStaffApi({ role: 'nurse' })

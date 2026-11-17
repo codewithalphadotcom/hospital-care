@@ -66,6 +66,7 @@ def test_booking_is_saved_and_audit_logged(client_as):
         "patientInitials": "A.K.",
         "status": "booked",
         "bookedBy": "Hina Javed",
+        "canCancel": True,
     }
     entry = AuditLog.objects.get(action="orbooking.created")
     assert entry.actor_email == "nurse@example.com" and entry.target_repr == "Appendicectomy"
@@ -214,6 +215,18 @@ def test_doctor_can_cancel_and_blood_bank_cannot(client_as):
     assert cancel(doctor, booking_id).status_code == 200
 
 
+def test_doctor_cannot_cancel_a_colleagues_booking_but_a_nurse_can(client_as):
+    room = make_room()
+    booking_id = book(client_as(Role.DOCTOR), room, at(10), at(11)).json()["id"]
+    other_doctor = client_as(Role.DOCTOR, email="surgeon2@example.com")
+    assert schedule(other_doctor).json()["rooms"][0]["bookings"][0]["canCancel"] is False
+    assert cancel(other_doctor, booking_id).status_code == 403
+    assert OrBooking.objects.get(pk=booking_id).status == "booked"
+    nurse = client_as(Role.NURSE)
+    assert schedule(nurse).json()["rooms"][0]["bookings"][0]["canCancel"] is True
+    assert cancel(nurse, booking_id).status_code == 200
+
+
 def test_another_hospitals_booking_cannot_be_cancelled(client_as, make_hospital):
     room = make_room(hospital=make_hospital("City"))
     booking_id = book(client_as(Role.ADMIN), room, at(10), at(11)).json()["id"]
@@ -249,6 +262,7 @@ def test_schedule_groups_each_rooms_bookings_in_time_order(client_as):
         "patientInitials": "",
         "status": "booked",
         "bookedBy": "",
+        "canCancel": False,  # a doctor viewing a nurse's booking
     }
     assert [b["procedure"] for b in cardiac_row["bookings"]] == ["CABG"]
     assert trauma_row["bookings"] == [] and trauma_row["status"] == "cleaning"

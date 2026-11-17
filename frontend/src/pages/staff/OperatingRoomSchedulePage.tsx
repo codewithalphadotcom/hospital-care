@@ -114,7 +114,7 @@ export default function OperatingRoomSchedulePage() {
                     <strong>{booking.procedure}</strong>
                   </p>
                   <p className={styles.meta}>{bookingMeta(booking)}</p>
-                  {editable && (
+                  {editable && booking.canCancel && (
                     <button
                       type="button"
                       className={bedStyles.action}

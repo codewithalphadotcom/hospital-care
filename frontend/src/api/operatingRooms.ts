@@ -78,6 +78,8 @@ export interface OrBooking {
   patientInitials: string
   status: 'booked' | 'cancelled'
   bookedBy: string
+  /** Whether the signed-in user may cancel it: admins and nurses any, others only their own. */
+  canCancel: boolean
 }
 
 /** A room and its booked slots on one day. */

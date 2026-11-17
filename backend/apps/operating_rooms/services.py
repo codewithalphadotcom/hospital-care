@@ -8,8 +8,9 @@ from django.db import IntegrityError, transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from apps.accounts.models import Role
 from apps.accounts.permissions import may_change
 from apps.audit.services import record
 from apps.resources.services import change_status
@@ -111,6 +112,12 @@ def book_operating_room(data: dict, *, actor) -> OrBooking:
     return booking
 
 
+def may_cancel(user, booking: OrBooking) -> bool:
+    """Admins and nurses coordinate the theatres, so they can cancel any booking they can see. Anyone else who
+    books (surgeons) can cancel only their own. The own-hospital rule is checked separately."""
+    return user.effective_role in (Role.ADMIN, Role.NURSE) or booking.booked_by_id == user.id
+
+
 @transaction.atomic
 def cancel_operating_booking(booking_id: int, *, actor) -> OrBooking:
     """Cancel a booked slot. The row is kept (status cancelled), so the room's history stays readable, and the
@@ -120,6 +127,8 @@ def cancel_operating_booking(booking_id: int, *, actor) -> OrBooking:
     )
     if not may_change(actor, booking.room):
         raise Http404
+    if not may_cancel(actor, booking):
+        raise PermissionDenied("You can only cancel bookings you made.")
     if booking.status != OrBookingStatus.BOOKED:
         raise TransitionNotAllowed("This booking is already cancelled.")
     booking.status = OrBookingStatus.CANCELLED
@@ -152,7 +161,7 @@ def day_schedule(user, day: date) -> dict:
     )
     by_room = defaultdict(list)
     for booking in bookings:
-        by_room[booking.room_id].append(OrBookingSerializer(booking).data)
+        by_room[booking.room_id].append(OrBookingSerializer(booking, context={"user": user}).data)
     return {
         "date": day.isoformat(),
         "rooms": [

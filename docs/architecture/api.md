@@ -172,7 +172,7 @@ Other roles get 403. Same own-hospital rule: another hospital's room is **404**.
 |---|---|---|---|
 | GET | `/operating-rooms/schedule/?date=YYYY-MM-DD` | – | `Schedule` (`date` defaults to today, local time; a bad date → 400) |
 | POST | `/operating-rooms/bookings/` | `{roomId, startsAt, endsAt, procedure, surgeon?, patientInitials?}` | 201 `Booking` |
-| POST | `/operating-rooms/bookings/<id>/cancel/` | – | 200 `Booking`, now `cancelled`; 409 if it already is |
+| POST | `/operating-rooms/bookings/<id>/cancel/` | – | 200 `Booking`, now `cancelled`; 409 if it already is; 403 for someone else's booking unless admin or nurse |
 
 ```ts
 Schedule = { date: string, rooms: { id, name, status, capabilities, bookings: Booking[] }[] }
@@ -182,6 +182,7 @@ Booking = {
   startsAt: string, endsAt: string,   // ISO 8601 with offset, e.g. "2030-01-15T09:00:00+05:00"
   procedure: string, surgeon: string, patientInitials: string,  // surgeon and initials may be ""
   status: 'booked' | 'cancelled', bookedBy: string                // bookedBy is the booker's full name
+  canCancel: boolean   // admins and nurses can cancel any booking, others (surgeons) only their own
 }
 ```
 
