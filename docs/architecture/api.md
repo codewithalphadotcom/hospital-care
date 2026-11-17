@@ -117,7 +117,8 @@ Users at a hospital see only its cases (another hospital's case → **404**); st
 | POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
 | GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions`, `outcome` and local availability. Escalates overdue cases first (#35) | #30, #33, #34, #35 |
 | POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
-| GET | `/emergencies/feed/?type=blood\|bed` | – | `FeedEntry[]`: every hospital's active requests of that type, most urgent first, at most 100. Escalates overdue cases first (#35) | #36 |
+| GET | `/emergencies/feed/?type=blood\|bed\|equipment\|operatingRoom` | – | `FeedEntry[]`: every hospital's active requests of that type, most urgent first, at most 100. Escalates overdue cases first (#35) | #36, #38 |
+| GET | `/emergencies/<id>/candidates/` | – | `CandidatesResponse`: the other hospitals that can supply each short need (see [Sources in the network](#sources-in-the-network-38)). Does not escalate | #38 |
 
 ```ts
 EmergencyCase = {
@@ -131,7 +132,13 @@ EmergencyCase = {
 }
 RequestItem = { type: 'blood', group: BloodGroup, component: Component, quantity: number }  // 1–20
             | { type: 'bed', bedType: 'icu' | 'emergency' | 'general' | 'isolation' | 'nicu', quantity: number }  // 1–5
+            | { type: 'equipment', equipmentType: 'ventilator' | 'monitor' | 'defibrillator' | 'dialysis', quantity: number }  // 1–5
+            | { type: 'operatingRoom', capability: 'general' | 'cardiac' | 'trauma' | 'neuro' | 'orthopedic' | 'obstetric' | 'pediatric', quantity: number }  // 1–3
 ```
+
+- **Equipment and operating rooms (#32, completed in #38).** A need sends only the field of its type: `equipmentType` for
+  equipment, `capability` for an operating room. Missing that field is **400**. Fields of other types are ignored and stored
+  blank. The line limits are lower for rooms (3) than for equipment (5), as beds are (5).
 
 **Rules**
 
@@ -221,6 +228,11 @@ EmergencyCaseDetail = EmergencyCase & {
   issued, discarded and expired units do not count. **Compatible groups do not count** (O− for an A+ need, for example):
   cross-group matching is story #37.
 - **Beds** count free beds (`status` `free`) of the need's `bedType` at the case's hospital.
+- **Equipment** counts available equipment (`status` `available`) of the need's `equipmentType` at the case's hospital.
+  In use, in maintenance and out of service do not count.
+- **Operating rooms** count available rooms (`status` `available`) at the case's hospital whose capabilities include the
+  need's `capability`. A room is one unit of stock: a room with two capabilities covers one line, so a cardiac line and a
+  general line that both want it leave one of them short. Lines take rooms in list order, the lowest id first.
 - Requirements that draw on the same stock share it in list order: the first sees the whole stock, the next sees what
   is left after it.
 - A case with no hospital has `localAvailable` 0 for every need, so each need's shortfall is what is still unfulfilled.
@@ -266,7 +278,8 @@ EmergencyCaseDetail = EmergencyCase & {
 wanted. Module `emergencies`: every role that can see emergencies can read it (admin, doctor, nurse, blood bank,
 pharmacist). Patients and signed-out users get **403**. It is not limited to the user's own hospital; that is the point.
 
-Query: `type` is `blood` (default) or `bed`. Any other value is **400** `{"type": ["..."]}`.
+Query: `type` is `blood` (default), `bed`, `equipment` or `operatingRoom`. Any other value is **400**
+`{"type": ["..."]}`.
 
 ```ts
 FeedEntry = {
@@ -279,6 +292,8 @@ FeedEntry = {
 }
 FeedNeed = { type: 'blood', group, component, quantity: number, fulfilled: number }
          | { type: 'bed', bedType, quantity: number, fulfilled: number }
+         | { type: 'equipment', equipmentType, quantity: number, fulfilled: number }
+         | { type: 'operatingRoom', capability, quantity: number, fulfilled: number }
 ```
 
 - **Included:** cases in status `open`, `matching`, `partiallyFulfilled` or `escalated`, from every hospital (and cases
@@ -294,6 +309,47 @@ FeedNeed = { type: 'blood', group, component, quantity: number, fulfilled: numbe
   is a 404. The client links only the user's own hospital's entries.
 - **Queries:** a fixed number, whatever the number of cases: the sweep's check, the cases with their hospitals, and
   their needs.
+
+## Sources in the network (#38)
+
+`GET /emergencies/<id>/candidates/` lists, for each need the case's own hospital cannot cover, the other hospitals that
+can supply it. Module `emergencies`, read rule as for the case detail: every role that can see emergencies, limited to
+the case's hospital, so another hospital's case is **404** and a patient is **403**.
+
+```ts
+CandidatesResponse = {
+  reference: string,               // "EC-2026-0001"
+  items: CandidateItem[]           // only the short needs; [] when everything is covered locally
+}
+CandidateItem = {
+  itemId: number,                  // the RequestItem's id
+  need: string,                    // label: "O- red cells", "ICU bed", "Ventilator", "Cardiac operating room"
+  shortfall: number,               // what the case's hospital cannot cover (#33)
+  candidates: Candidate[]          // covering first, then nearest, then hospital id
+}
+Candidate = {
+  hospital: { id: number, name: string },
+  available: number,               // matchable at that hospital for this need
+  covers: boolean,                 // available >= shortfall
+  distanceKm: number | null,       // straight-line, one decimal
+  travelMinutes: number | null,    // estimated travel time (#39), whole minutes
+  earliestExpiry?: string,         // blood only: the soonest expiry among its matching units
+  bestDonorRank?: number           // blood only: 0 is the identical group, higher is a compatible substitute
+}
+```
+
+- **Matchable**, per requirement type (the registry in `backend/apps/matching/candidates.py`): blood units that #37
+  allows for the recipient group and component and that are usable; beds free of the type; equipment available of the
+  type; operating rooms available with the capability. Each is counted per hospital.
+- **Left out:** the case's own hospital (its stock is already counted in #33), inactive hospitals, and hospitals with
+  nothing matchable.
+- **Order:** covering candidates first, then the nearest (a candidate with no distance comes last), then hospital id. This
+  is deliberately plain. Scoring (#40) and ranking (#41) replace it later.
+- **Distance** is `null` when the case has no hospital or either side has no coordinates.
+- **Per requirement.** Two needs can both count the same unit at another hospital. Allocation (#45) is what claims stock.
+- **Read only.** Nothing is stored, and the endpoint does not run the overdue sweep (#35).
+- **Queries:** a fixed number: the case with its needs and local stock (as in #33), one grouped query per short need, and
+  one hospital fetch for all the candidates together. It does not query per hospital.
 
 ## Equipment (Sprint 4)
 
