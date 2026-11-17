@@ -4,6 +4,7 @@ import type { BedAction, BedBoard } from '../api/beds'
 import type {
   CandidatesResponse,
   CaseAction,
+  CaseAllocation,
   CaseInput,
   CaseReservation,
   CaseStatus,
@@ -11,6 +12,8 @@ import type {
   EmergencyCase,
   EmergencyCaseDetail,
   FeedEntry,
+  HeldReservation,
+  ResourceType,
   Severity,
   StatusChange,
 } from '../api/emergencies'
@@ -82,6 +85,12 @@ export function mockApi(routes: Record<string, Route>) {
   })
 }
 
+/** The module whose edit right lets a role allocate each type (story #45), as in the server's ALLOCATION_MODULE. */
+const TYPE_MODULE: Record<ResourceType, Module> = { blood: 'blood', bed: 'beds', equipment: 'equipment', operatingRoom: 'operatingRooms' }
+
+/** The case statuses that still take stock (the server's RESERVABLE). */
+const RESERVABLE_STATUSES: readonly CaseStatus[] = ['open', 'matching', 'partiallyFulfilled', 'escalated']
+
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, moderate: 2, low: 3 }
 
 /** The order the server lists cases in: most severe first, then the oldest case first (story #31). */
@@ -144,6 +153,10 @@ type StaffApiOptions = {
   feed?: FeedEntry[]
   /** Use these sources (story #38) for whichever case is asked for, instead of the sample ones. */
   candidates?: CandidatesResponse
+  /** Free units per need (in item order) by case, instead of the sample stock. */
+  stock?: Record<string, number[]>
+  /** Start with this many units held for a case's need, as if reserved earlier (story #43). */
+  held?: { reference: string; itemId: number; count: number }[]
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -202,6 +215,14 @@ function resourceLabel(need: Need, id: number): string {
   return `OR ${id}`
 }
 
+/** A need as the server labels it on a held reservation: "O- red cells", "ICU bed", "Ventilator", "Cardiac operating room". */
+function needLabel(need: Need): string {
+  if (need.type === 'blood') return `${need.group} ${need.component === 'redCells' ? 'red cells' : need.component}`
+  if (need.type === 'bed') return `${need.bedType.toUpperCase()} bed`
+  if (need.type === 'equipment') return need.equipmentType === 'ventilator' ? 'Ventilator' : need.equipmentType
+  return `${need.capability} operating room`
+}
+
 /** "+05:00"-stamped time as HH:MM, the way the server words a clash. */
 const clock = (iso: string) => iso.slice(11, 16)
 
@@ -215,6 +236,8 @@ export function mockStaffApi({
   histories: customHistories,
   feed: customFeed,
   candidates: customCandidates,
+  stock: customStock,
+  held: seedHolds = [],
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -237,7 +260,7 @@ export function mockStaffApi({
   /** Free units per need at this hospital, from the sample stock. A hold takes one unit; a release gives it back. */
   const localStock = new Map<string, number[]>()
   const stockOf = (c: EmergencyCase): number[] => {
-    if (!localStock.has(c.id)) localStock.set(c.id, c.items.map((_, i) => sampleLocalAvailable[c.id]?.[i] ?? 0))
+    if (!localStock.has(c.id)) localStock.set(c.id, c.items.map((_, i) => (customStock ?? sampleLocalAvailable)[c.id]?.[i] ?? 0))
     return localStock.get(c.id)!
   }
   /** Each case's holds on its stock, held or ended (story #43). Each hold is one unit of one need. */
@@ -247,6 +270,13 @@ export function mockStaffApi({
     return holdsByCase.get(reference)!
   }
   let nextHoldId = 1
+  /** What each case's needs have had allocated (story #45), in item order, and the allocations made. */
+  const fulfilledByCase = new Map<string, number[]>()
+  const fulfilledFor = (reference: string, itemId: number) => fulfilledByCase.get(reference)?.[itemId - 1] ?? 0
+  const allocationsByCase = new Map<string, CaseAllocation[]>()
+  /** Whether the signed-in role may allocate this hold: it is held, and the role can edit its type's module. */
+  const canAllocateHold = (c: EmergencyCase, hold: CaseReservation) =>
+    hold.status === 'held' && !!role && role !== 'patient' && canEdit(role, TYPE_MODULE[c.items[hold.itemId - 1]!.type])
   const heldFor = (reference: string, itemId: number) =>
     holdsOf(reference).filter((hold) => hold.itemId === itemId && hold.status === 'held').length
   /** The case as the server returns it: each need with what this hospital has (story #33) and its holds (story #43). */
@@ -255,7 +285,16 @@ export function mockStaffApi({
     const items = c.items.map((need, i) => {
       const reserved = heldFor(c.id, i + 1)
       const available = local[i] ?? 0
-      return { ...need, itemId: i + 1, localAvailable: available, shortfall: Math.max(0, need.quantity - reserved - available), reserved }
+      const fulfilled = fulfilledFor(c.id, i + 1)
+      return {
+        ...need,
+        itemId: i + 1,
+        fulfilled,
+        remaining: need.quantity - fulfilled,
+        localAvailable: available,
+        shortfall: Math.max(0, need.quantity - fulfilled - reserved - available),
+        reserved,
+      }
     })
     const history = histories.get(c.id) ?? []
     const closes = history.filter((change) => change.action === 'close')
@@ -266,8 +305,99 @@ export function mockStaffApi({
       history,
       actions: actionsFor(c.status),
       outcome: closes.length ? closes[closes.length - 1].note : null,
-      reservations: holdsOf(c.id).filter((hold) => hold.status === 'held' || hold.status === 'allocated'),
+      reservations: holdsOf(c.id)
+        .filter((hold) => hold.status === 'held' || hold.status === 'allocated')
+        .map((hold) => ({ ...hold, canAllocate: canAllocateHold(c, hold) })),
+      allocations: allocationsByCase.get(c.id) ?? [],
     }
+  }
+  /** Hold up to `quantity` free units for a need (story #43). Each hold is one unit; a case that is open starts matching. */
+  const makeHolds = (found: EmergencyCase, itemId: number, quantity: number): CaseReservation[] => {
+    const need = found.items[itemId - 1]!
+    const stock = stockOf(found)
+    const taken = Math.min(stock[itemId - 1] ?? 0, quantity)
+    stock[itemId - 1] -= taken
+    const hospital = found.hospital ?? { id: 0, name: '' }
+    const made: CaseReservation[] = Array.from({ length: taken }, () => {
+      const id = nextHoldId++
+      return {
+        id,
+        itemId,
+        resource: resourceLabel(need, id),
+        hospital,
+        status: 'held',
+        expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+        reservedBy: role ? NAMES[role] : '',
+        canAllocate: false,
+      }
+    })
+    holdsOf(found.id).push(...made)
+    if (taken > 0 && found.status === 'open') {
+      histories.set(found.id, [
+        ...(histories.get(found.id) ?? []),
+        { fromStatus: 'open', toStatus: 'matching', action: 'startMatching', note: `Stock reserved at ${hospital.name}`, actor: null, at: new Date().toISOString() },
+      ])
+      found.status = 'matching'
+    }
+    return made
+  }
+  for (const { reference, itemId, count } of seedHolds) makeHolds(findCase(reference)!, itemId, count)
+  const findHold = (id: number) => {
+    for (const c of cases) {
+      const hold = holdsOf(c.id).find((h) => h.id === id)
+      if (hold) return { c, hold }
+    }
+    return undefined
+  }
+  /** Why this hold can't be allocated now, as the server answers it, or null when it can (stories #45, #46). */
+  const allocationRefusal = (c: EmergencyCase, hold: CaseReservation): Reply | null => {
+    if (!role || role === 'patient' || !canEdit(role, TYPE_MODULE[c.items[hold.itemId - 1]!.type])) {
+      return fail(403, { detail: 'Your role can’t allocate this.' })
+    }
+    if (hold.status !== 'held') {
+      return fail(409, {
+        detail: hold.status === 'allocated' ? 'This reservation is already allocated.' : `This reservation is ${hold.status}, so it can't be allocated.`,
+      })
+    }
+    if (!RESERVABLE_STATUSES.includes(c.status)) {
+      return fail(409, { detail: `Can't allocate for a case that is ${STATUS_LABEL[c.status].toLowerCase()}.` })
+    }
+    return null
+  }
+  /** Allocate one hold: the resource is handed over, the need's count goes up, and the case moves as the server moves it. */
+  const allocateHold = (c: EmergencyCase, hold: CaseReservation, note: string): CaseAllocation => {
+    hold.status = 'allocated'
+    const counts = fulfilledByCase.get(c.id) ?? c.items.map(() => 0)
+    counts[hold.itemId - 1] += 1
+    fulfilledByCase.set(c.id, counts)
+    const need = c.items[hold.itemId - 1]!
+    if (need.type === 'blood') {
+      const unit = units.find((u) => u.status === 'available' && u.group === need.group && u.component === need.component)
+      if (unit) unit.status = 'issued'
+    }
+    const at = new Date().toISOString()
+    const allocation: CaseAllocation = {
+      id: nextAllocationId++,
+      itemId: hold.itemId,
+      resource: hold.resource,
+      hospital: hold.hospital,
+      allocatedBy: role ? NAMES[role] : '',
+      at,
+      note,
+    }
+    allocationsByCase.set(c.id, [...(allocationsByCase.get(c.id) ?? []), allocation])
+    const complete = c.items.every((item, i) => counts[i] >= item.quantity)
+    const left = c.items.reduce((sum, item, i) => sum + item.quantity - counts[i], 0)
+    const move = (toStatus: CaseStatus, action: CaseAction) => {
+      const entry: StatusChange = { fromStatus: c.status, toStatus, action, note: complete ? 'Every need allocated' : `${left} still to allocate`, actor: null, at }
+      histories.set(c.id, [...(histories.get(c.id) ?? []), entry])
+      c.status = toStatus
+    }
+    if (c.status === 'open') move('matching', 'startMatching')
+    else if (c.status === 'escalated') move('matching', 'resumeMatching')
+    if (c.status === 'matching') move(complete ? 'fulfilled' : 'partiallyFulfilled', complete ? 'fulfil' : 'partiallyFulfil')
+    else if (complete && c.status === 'partiallyFulfilled') move('fulfilled', 'fulfil')
+    return allocation
   }
   const equipment = sampleEquipment(now)
   const rooms = sampleOperatingRooms(now)
@@ -292,6 +422,7 @@ export function mockStaffApi({
     return { ...unit, donorId: null, tests, missingTests: REQUIRED_TESTS.map((t) => t.id).filter((id) => !passed.has(id)) }
   }
   let nextId = 100
+  let nextAllocationId = 1
 
   const fetchMock = mockApi({
     'GET /auth/me/': role ? ok(userFor(role)) : fail(403),
@@ -417,36 +548,13 @@ export function mockStaffApi({
       const { itemId, quantity } = body as { itemId: number; quantity: number }
       const need = found.items[itemId - 1]
       if (!need) return fail(400, { itemId: ['No need with that id on this case.'] })
-      if (!['open', 'matching', 'partiallyFulfilled', 'escalated'].includes(found.status)) {
+      if (!RESERVABLE_STATUSES.includes(found.status)) {
         return fail(400, { detail: `Can't reserve stock for a case that is ${STATUS_LABEL[found.status].toLowerCase()}.` })
       }
-      const remaining = need.quantity - heldFor(found.id, itemId)
+      const remaining = need.quantity - fulfilledFor(found.id, itemId) - heldFor(found.id, itemId)
       if (quantity > remaining) return fail(400, { detail: `Only ${Math.max(remaining, 0)} more can be reserved for this need.` })
-      const stock = stockOf(found)
-      const taken = Math.min(stock[itemId - 1] ?? 0, quantity)
-      if (taken === 0) return fail(400, { detail: 'No matching stock is free at this hospital.' })
-      stock[itemId - 1] -= taken
-      const hospital = found.hospital ?? { id: 0, name: '' }
-      const made: CaseReservation[] = Array.from({ length: taken }, () => {
-        const id = nextHoldId++
-        return {
-          id,
-          itemId,
-          resource: resourceLabel(need, id),
-          hospital,
-          status: 'held',
-          expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
-          reservedBy: role ? NAMES[role] : '',
-        }
-      })
-      holdsOf(found.id).push(...made)
-      if (found.status === 'open') {
-        histories.set(found.id, [
-          ...(histories.get(found.id) ?? []),
-          { fromStatus: 'open', toStatus: 'matching', action: 'startMatching', note: `Stock reserved at ${hospital.name}`, actor: null, at: new Date().toISOString() },
-        ])
-        found.status = 'matching'
-      }
+      const made = makeHolds(found, itemId, quantity)
+      if (made.length === 0) return fail(400, { detail: 'No matching stock is free at this hospital.' })
       return { status: 201, body: made }
     }),
     'POST /emergencies/:reference/reservations/:id/release/': edit('emergencies', ({ params }) => {
@@ -459,6 +567,57 @@ export function mockStaffApi({
       stockOf(found)[hold.itemId - 1] += 1
       return ok(hold)
     }),
+    // Held reservations across the user's hospital, for the types the role can see (story #46).
+    'GET /reservations/': ({ query }) => {
+      if (networkDown) return fail(503)
+      if (!role || role === 'patient') return fail(403)
+      const visible = (Object.keys(TYPE_MODULE) as ResourceType[]).filter((type) => canSee(role, TYPE_MODULE[type]))
+      const kind = query.get('type') as ResourceType | null
+      if (visible.length === 0 || (kind && !visible.includes(kind))) return fail(403, { detail: 'Your role can’t see this.' })
+      const held: HeldReservation[] = [...cases].sort(byPriority).flatMap((c) =>
+        holdsOf(c.id)
+          .filter((hold) => hold.status === 'held')
+          .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt) || a.id - b.id)
+          .flatMap((hold) => {
+            const need = c.items[hold.itemId - 1]!
+            if (!visible.includes(need.type) || (kind && need.type !== kind)) return []
+            const fulfilled = fulfilledFor(c.id, hold.itemId)
+            return [
+              {
+                id: hold.id,
+                type: need.type,
+                status: 'held' as const,
+                case: { reference: c.id, severity: c.severity, status: c.status },
+                need: { itemId: hold.itemId, label: needLabel(need), quantity: need.quantity, fulfilled, remaining: need.quantity - fulfilled },
+                resource: hold.resource,
+                expiresAt: hold.expiresAt,
+                reservedBy: hold.reservedBy,
+                canAllocate: canAllocateHold(c, hold),
+              },
+            ]
+          }),
+      )
+      return ok(held)
+    },
+    'POST /reservations/allocate/': ({ body }) => {
+      if (networkDown) return fail(503)
+      const found = ((body as { ids: number[] }).ids ?? []).map(findHold)
+      if (found.length === 0 || found.some((entry) => !entry)) return fail(404, { detail: 'No reservation with one of those ids.' })
+      for (const { c, hold } of found as NonNullable<(typeof found)[number]>[]) {
+        const refusal = allocationRefusal(c, hold)
+        if (refusal) return refusal
+      }
+      const made = (found as NonNullable<(typeof found)[number]>[]).map(({ c, hold }) => allocateHold(c, hold, ''))
+      return { status: 201, body: made }
+    },
+    'POST /reservations/:id/allocate/': ({ params, body }) => {
+      if (networkDown) return fail(503)
+      const entry = findHold(Number(params.id))
+      if (!entry || !role || role === 'patient') return fail(entry ? 403 : 404)
+      const refusal = allocationRefusal(entry.c, entry.hold)
+      if (refusal) return refusal
+      return { status: 201, body: allocateHold(entry.c, entry.hold, ((body as { note?: string } | undefined)?.note ?? '').trim()) }
+    },
     'GET /users/': view('users', () => ok(users)),
     'PATCH /users/:id/': edit('users', ({ params, body }) => {
       const user = users.find((u) => u.id === Number(params.id))
