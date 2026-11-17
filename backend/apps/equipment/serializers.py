@@ -1,6 +1,11 @@
 from rest_framework import serializers
 
-from .models import Equipment, EquipmentStatus, EquipmentType
+from .models import EQUIPMENT_LIFECYCLE, Equipment, EquipmentStatus, EquipmentType
+
+
+class EquipmentActionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=EQUIPMENT_LIFECYCLE.actions)
+    reason = serializers.CharField(max_length=300, required=False, allow_blank=True, default="")
 
 
 class EquipmentSerializer(serializers.ModelSerializer):

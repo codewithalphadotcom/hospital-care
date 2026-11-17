@@ -67,4 +67,37 @@ describe('EquipmentPage (story #26 Equipment registry)', () => {
     await screen.findByRole('table', { name: 'Equipment' })
     expect(screen.queryByRole('button', { name: 'Register equipment' })).not.toBeInTheDocument()
   })
+
+  it('changes status from the row: saves it through the API and updates the row', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/equipment')
+    await screen.findByRole('table', { name: 'Equipment' })
+    await userEvent.click(screen.getByRole('button', { name: 'Mark in use VENT-002' }))
+    expect(await screen.findByText('VENT-002 is now in use')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/equipment/2/actions/'),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'use' }) }),
+    )
+    const row = screen.getByRole('rowheader', { name: 'VENT-002' }).closest('tr') as HTMLElement
+    expect(within(row).getByText('In use')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Release VENT-002' })).toBeInTheDocument()
+    expect(screen.getByText('1 of 5 available right now.')).toBeInTheDocument()
+  })
+
+  it('offers only the moves allowed from the current status', async () => {
+    mockStaffApi({ role: 'admin' })
+    renderStaff('/staff/equipment')
+    await screen.findByRole('table', { name: 'Equipment' })
+    expect(screen.getByRole('button', { name: 'Finish maintenance VENT-003' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Take out of service VENT-003' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mark in use VENT-003' })).not.toBeInTheDocument()
+  })
+
+  it('shows no status actions to a doctor (view only)', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/equipment')
+    const table = await screen.findByRole('table', { name: 'Equipment' })
+    expect(within(table).queryByRole('columnheader', { name: 'Change status' })).not.toBeInTheDocument()
+    expect(within(table).queryAllByRole('button')).toHaveLength(0)
+  })
 })

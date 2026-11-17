@@ -40,3 +40,10 @@ export function getEquipment(): Promise<Equipment[]> {
 export function createEquipment(input: EquipmentInput): Promise<Equipment> {
   return apiPost<Equipment>('/equipment/', input)
 }
+
+export type EquipmentAction = 'use' | 'release' | 'startMaintenance' | 'finishMaintenance' | 'outOfService' | 'returnToService'
+
+/** Move equipment along its lifecycle. POST /api/equipment/<id>/actions/ (equipment: edit). 409 if the move isn't allowed any more. */
+export function postEquipmentAction(id: number, action: EquipmentAction): Promise<Equipment> {
+  return apiPost<Equipment>(`/equipment/${id}/actions/`, { action })
+}

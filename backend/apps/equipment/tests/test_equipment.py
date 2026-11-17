@@ -87,3 +87,81 @@ def test_doctor_can_view_but_not_register(client_as):
 @pytest.mark.parametrize("role", [Role.BLOOD_BANK, Role.PHARMACIST, Role.PATIENT])
 def test_roles_without_equipment_access(client_as, role):
     assert client_as(role).get(reverse("equipment-list")).status_code == 403
+
+
+# Story #27: operational status.
+
+
+def act(client, pk, action, **extra):
+    return client.post(reverse("equipment-action", args=[pk]), {"action": action, **extra}, format="json")
+
+
+@pytest.mark.parametrize(
+    ("start", "action", "end"),
+    [
+        ("available", "use", "inUse"),
+        ("inUse", "release", "available"),
+        ("available", "startMaintenance", "maintenance"),
+        ("inUse", "startMaintenance", "maintenance"),
+        ("maintenance", "finishMaintenance", "available"),
+        ("available", "outOfService", "outOfService"),
+        ("maintenance", "outOfService", "outOfService"),
+        ("outOfService", "returnToService", "maintenance"),
+    ],
+)
+def test_allowed_moves(client_as, start, action, end):
+    item = make("VENT-001", status=start)
+    res = act(client_as(Role.NURSE), item.pk, action)
+    assert res.status_code == 200 and res.json()["status"] == end
+
+
+def test_status_change_is_saved_and_audit_logged(client_as):
+    item = make("VENT-001")
+    res = act(client_as(Role.NURSE), item.pk, "use", reason="Patient moved to bay 2")
+    assert res.status_code == 200 and res.json()["statusSince"]
+    item.refresh_from_db()
+    assert item.status == "inUse"
+    entry = AuditLog.objects.get(action="equipment.status_changed")
+    assert entry.actor_email == "nurse@example.com" and entry.target_repr == "VENT-001 (Ventilator)"
+    assert (entry.before, entry.after, entry.reason) == (
+        {"status": "available"},
+        {"status": "inUse"},
+        "Patient moved to bay 2",
+    )
+
+
+def test_refused_move_is_409_and_changes_nothing(client_as):
+    item = make("VENT-001", status="maintenance")
+    res = act(client_as(Role.NURSE), item.pk, "use")
+    assert res.status_code == 409 and "piece of equipment" in res.json()["detail"]
+    item.refresh_from_db()
+    assert item.status == "maintenance"
+    assert not AuditLog.objects.filter(action="equipment.status_changed").exists()
+
+
+def test_unknown_action_is_400(client_as):
+    item = make("VENT-001")
+    assert act(client_as(Role.NURSE), item.pk, "teleport").status_code == 400
+
+
+def test_doctor_cannot_change_status(client_as):
+    item = make("VENT-001")
+    assert act(client_as(Role.DOCTOR), item.pk, "use").status_code == 403
+    item.refresh_from_db()
+    assert item.status == "available"
+
+
+def test_other_hospitals_equipment_is_not_found(client_as, make_hospital):
+    seaview, city = make_hospital("Seaview"), make_hospital("City")
+    item = make("VENT-001", hospital=city)
+    assert act(client_as(Role.NURSE, hospital=seaview), item.pk, "use").status_code == 404
+    item.refresh_from_db()
+    assert item.status == "available"
+
+
+def test_matchable_is_only_available_equipment():
+    make("VENT-001", status="available")
+    make("VENT-002", status="inUse")
+    make("VENT-003", status="maintenance")
+    make("VENT-004", status="outOfService")
+    assert list(Equipment.objects.matchable().values_list("identifier", flat=True)) == ["VENT-001"]

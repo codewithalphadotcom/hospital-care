@@ -1,9 +1,22 @@
 import { useState } from 'react'
-import { EQUIPMENT_STATUSES, EQUIPMENT_TYPES, getEquipment, type Equipment, type EquipmentStatus, type EquipmentType } from '../../api/equipment'
+import { ApiError } from '../../api/client'
+import {
+  EQUIPMENT_STATUSES,
+  EQUIPMENT_TYPES,
+  getEquipment,
+  postEquipmentAction,
+  type Equipment,
+  type EquipmentAction,
+  type EquipmentStatus,
+  type EquipmentType,
+} from '../../api/equipment'
+import { FormAlert } from '../../components/form/FormAlert'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge, type Tone } from '../../components/ui/StatusBadge'
+import bedStyles from '../../features/beds/Beds.module.css'
 import { RegisterEquipmentForm } from '../../features/equipment/RegisterEquipmentForm'
+import { actionsFor } from '../../features/equipment/equipment'
 import { canEdit } from '../../features/staff/roles'
 import { useStaff } from '../../features/staff/staffContext'
 import { useLoad } from '../../lib/useLoad'
@@ -17,16 +30,20 @@ const TONE: Record<EquipmentStatus, Tone> = { available: 'ok', inUse: 'neutral',
 const statusLabel = (s: EquipmentStatus) => EQUIPMENT_STATUSES.find((x) => x.value === s)!.label
 const typeLabel = (t: EquipmentType) => EQUIPMENT_TYPES.find((x) => x.value === t)!.label.replace(/s$/, '')
 
-/** Equipment registry (story #26): critical equipment with type, asset tag, location and status. */
+/** Equipment registry (story #26) and operational status (story #27). */
 export default function EquipmentPage() {
   const { role } = useStaff()
   const { result, setData } = useLoad(getEquipment)
   const [type, setType] = useState<TypeFilter>('all')
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [busyId, setBusyId] = useState<number>()
+  const [announcement, setAnnouncement] = useState('')
+  const [error, setError] = useState<string>()
 
   if (result.state !== 'ready') return <StaffDataState failed={result.state === 'failed'} />
 
   const items = result.data
+  const editable = canEdit(role, 'equipment')
   const shown = items.filter((e) => (type === 'all' || e.type === type) && (status === 'all' || e.status === status))
   const typeOptions = [{ value: 'all' as const, label: 'All' }, ...EQUIPMENT_TYPES].map((o) => ({
     ...o,
@@ -38,11 +55,30 @@ export default function EquipmentPage() {
   }))
   const available = items.filter((e) => e.status === 'available').length
 
+  /** Save the change, update the row from the server's copy, then announce it. */
+  const change = async (item: Equipment, action: EquipmentAction) => {
+    setBusyId(item.id)
+    setError(undefined)
+    try {
+      const saved = await postEquipmentAction(item.id, action)
+      setData((current) => current.map((e) => (e.id === saved.id ? saved : e)))
+      setAnnouncement(`${item.identifier} is now ${statusLabel(saved.status).toLowerCase()}`)
+    } catch (err) {
+      setError(`${item.identifier}: ${await failureMessage(err, setData)}`)
+    } finally {
+      setBusyId(undefined)
+    }
+  }
+
   return (
     <div className={pageStyles.stack}>
-      {canEdit(role, 'equipment') && (
+      {editable && (
         <RegisterEquipmentForm onRegistered={(item) => setData((current) => [...current, item])} />
       )}
+      <FormAlert>{error}</FormAlert>
+      <p role="status" className="visually-hidden">
+        {announcement}
+      </p>
       <Panel title="Critical equipment">
         <p>
           {available} of {items.length} available right now.
@@ -65,6 +101,7 @@ export default function EquipmentPage() {
                   <th scope="col">Make and model</th>
                   <th scope="col">Location</th>
                   <th scope="col">Status</th>
+                  {editable && <th scope="col">Change status</th>}
                 </tr>
               </thead>
               <tbody>
@@ -77,6 +114,24 @@ export default function EquipmentPage() {
                     <td>
                       <StatusBadge tone={TONE[e.status]}>{statusLabel(e.status)}</StatusBadge>
                     </td>
+                    {editable && (
+                      <td>
+                        <div className={bedStyles.actions}>
+                          {actionsFor(e.status).map((t) => (
+                            <button
+                              key={t.action}
+                              type="button"
+                              className={bedStyles.action}
+                              aria-label={`${t.label} ${e.identifier}`}
+                              disabled={busyId === e.id}
+                              onClick={() => change(e, t.action)}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -86,4 +141,18 @@ export default function EquipmentPage() {
       </Panel>
     </div>
   )
+}
+
+const NO_RESPONSE = 'The hospital’s system didn’t respond, so the status wasn’t changed. Try again.'
+
+/** Why a status change failed. A 409 means someone moved the item first, so the list is reloaded. */
+async function failureMessage(error: unknown, setData: (update: (current: Equipment[]) => Equipment[]) => void): Promise<string> {
+  if (!(error instanceof ApiError)) return NO_RESPONSE
+  if (error.status === 403) return 'Your role can’t change equipment status.'
+  if (error.status === 409) {
+    const fresh = await getEquipment().catch(() => null)
+    if (fresh) setData(() => fresh)
+    return 'That move is no longer allowed, because the status changed first. The list shows the latest status.'
+  }
+  return NO_RESPONSE
 }

@@ -115,6 +115,7 @@ roles 403. Staff see only their own hospital's equipment; every registration is 
 |---|---|---|---|
 | GET | `/equipment/?type=&status=&q=` | – | `Equipment[]` (`q` searches asset tag, make/model and location) |
 | POST | `/equipment/` | `{identifier, type, name?, location, status?}` | 201 `Equipment` |
+| POST | `/equipment/<id>/actions/` | `{action, reason?}` | 200 `Equipment` (#27) |
 
 ```ts
 Equipment = {
@@ -126,8 +127,12 @@ Equipment = {
 }
 ```
 
-Changing status after registration is #27 (Equipment operational status); the lifecycle is already defined in
-`apps/equipment/models.py`.
+Equipment actions (#27): `use`, `release`, `startMaintenance`, `finishMaintenance`, `outOfService`,
+`returnToService`. The lifecycle is in `apps/equipment/models.py`. A move it doesn't allow (e.g. using equipment
+that is in maintenance) returns **409** and changes nothing. Unknown action → 400; equipment outside the user's
+hospital → 404. Every change is audit-logged (`equipment.status_changed`) with the optional `reason`.
+`Equipment.objects.matchable()` returns only `available` items; the matching engine uses it so in-use,
+maintenance and out-of-service equipment is never matched.
 
 ## Demo data
 

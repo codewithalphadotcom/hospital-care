@@ -4,10 +4,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import module_permission
+from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import Equipment, EquipmentStatus, EquipmentType
-from .serializers import EquipmentSerializer
-from .services import register_equipment
+from .serializers import EquipmentActionSerializer, EquipmentSerializer
+from .services import apply_equipment_action, register_equipment
 
 
 class EquipmentListView(APIView):
@@ -36,3 +37,19 @@ class EquipmentListView(APIView):
         serializer.is_valid(raise_exception=True)
         equipment = register_equipment(serializer, request.user)
         return Response(EquipmentSerializer(equipment).data, status=status.HTTP_201_CREATED)
+
+
+class EquipmentActionView(APIView):
+    """POST /api/equipment/<id>/actions/ {"action": "use", "reason"?} → the updated equipment (edit only)."""
+
+    permission_classes = [module_permission("equipment")]
+
+    def post(self, request, pk):
+        serializer = EquipmentActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            equipment = apply_equipment_action(pk, data["action"], actor=request.user, reason=data["reason"])
+        except TransitionNotAllowed as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(EquipmentSerializer(equipment).data)

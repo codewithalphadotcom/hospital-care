@@ -2,11 +2,12 @@ import { vi } from 'vitest'
 import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
-import type { Equipment, EquipmentInput } from '../api/equipment'
+import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
 import type { UserSummary } from '../api/users'
 import { applyAction } from '../features/beds/beds'
+import { applyEquipmentAction } from '../features/equipment/equipment'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
@@ -212,6 +213,16 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
       const created: Equipment = { ...input, identifier: tag, id: nextId++, statusSince: now.toISOString(), hospital: 'CityCare General Hospital' }
       equipment.push(created)
       return { status: 201, body: created }
+    }),
+    'POST /equipment/:id/actions/': edit('equipment', ({ params, body }) => {
+      const index = equipment.findIndex((e) => e.id === Number(params.id))
+      if (index < 0) return fail(404)
+      try {
+        equipment[index] = applyEquipmentAction(equipment[index], (body as { action: EquipmentAction }).action, new Date())
+      } catch (error) {
+        return fail(409, { detail: (error as Error).message })
+      }
+      return ok(equipment[index])
     }),
     'POST /hospitals/': edit('hospitals', ({ body }) => {
       const input = body as HospitalInput

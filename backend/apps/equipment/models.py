@@ -23,9 +23,9 @@ class EquipmentStatus(models.TextChoices):
 
 S = EquipmentStatus
 
-# Status changes after registration are story #27 (Equipment operational status), which adds the API.
+# Status changes go through POST /api/equipment/<id>/actions/ (story #27).
 EQUIPMENT_LIFECYCLE = StateMachine(
-    "equipment",
+    "piece of equipment",  # for the 409 message: "Can't use a piece of equipment that is in use."
     EquipmentStatus,
     {
         (S.AVAILABLE, "use"): S.IN_USE,
@@ -40,10 +40,18 @@ EQUIPMENT_LIFECYCLE = StateMachine(
 )
 
 
+class EquipmentQuerySet(models.QuerySet):
+    def matchable(self):
+        """Only what can be assigned right now. The matching engine calls this, so in use, maintenance and
+        out-of-service items are never matched."""
+        return self.filter(status=EquipmentStatus.AVAILABLE)
+
+
 class Equipment(Resource):
     """One piece of critical equipment, e.g. ventilator VENT-003 in ICU bay 2 (story #26)."""
 
     machine = EQUIPMENT_LIFECYCLE
+    objects = EquipmentQuerySet.as_manager()
 
     identifier = models.CharField(
         max_length=40, help_text="Asset tag, e.g. VENT-003. Unique within a hospital."
