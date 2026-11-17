@@ -134,6 +134,35 @@ hospital → 404. Every change is audit-logged (`equipment.status_changed`) with
 `Equipment.objects.matchable()` returns only `available` items; the matching engine uses it so in-use,
 maintenance and out-of-service equipment is never matched.
 
+## Operating rooms (Sprint 4)
+
+Operating rooms and what each is equipped for (#28). Access: admin and nurse **edit**, doctor **view**; other
+roles 403. Staff see only their own hospital's rooms; every registration is audit-logged.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/operating-rooms/?capability=&status=&q=` | – | `OperatingRoom[]` (`q` searches name and location; an unknown `capability` or `status` is ignored) |
+| POST | `/operating-rooms/` | `{name, capabilities, location?, status?}` | 201 `OperatingRoom` |
+| POST | `/operating-rooms/<id>/actions/` | `{action, reason?}` | 200 `OperatingRoom` (#28) |
+
+```ts
+OperatingRoom = {
+  id: number, name: string,   // e.g. "OR 1"; unique within a hospital, any case (400 otherwise)
+  capabilities: ('general' | 'cardiac' | 'trauma' | 'neuro' | 'orthopedic' | 'obstetric' | 'pediatric')[],
+                              // at least one (400 otherwise); stored sorted, without repeats
+  location: string,           // e.g. "Block B, floor 2", may be empty
+  status: 'available' | 'inUse' | 'cleaning' | 'maintenance' | 'outOfService',  // defaults to available
+  statusSince: string, hospital: string | null
+}
+```
+
+Actions: `startCase`, `finishCase`, `finishCleaning`, `startMaintenance`, `finishMaintenance`, `outOfService`,
+`returnToService`. The lifecycle is in `apps/operating_rooms/models.py`. A move it doesn't allow returns **409**
+and changes nothing. Unknown action → 400. A room outside the user's hospital → 404 (admins can change any
+hospital's room). Registration is audit-logged as `operatingroom.registered`; status changes as
+`operatingroom.status_changed` (the shared `change_status` helper names them after the model).
+`OperatingRoom.objects.matchable()` returns only `available` rooms, and `with_capability(code)` filters by capability.
+
 ## Demo data
 
 ```bash

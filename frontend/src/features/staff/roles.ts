@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'doctor' | 'nurse' | 'bloodBank' | 'pharmacist'
-export type Module = 'overview' | 'beds' | 'blood' | 'pharmacy' | 'equipment' | 'hospitals' | 'users'
+export type Module = 'overview' | 'beds' | 'blood' | 'pharmacy' | 'equipment' | 'operatingRooms' | 'hospitals' | 'users'
 
 export const ROLES: readonly { id: Role; label: string }[] = [
   { id: 'admin', label: 'Admin' },
@@ -15,6 +15,7 @@ export const MODULES: readonly { id: Module; label: string; path: string }[] = [
   { id: 'blood', label: 'Blood bank', path: '/staff/blood' },
   { id: 'pharmacy', label: 'Pharmacy', path: '/staff/pharmacy' },
   { id: 'equipment', label: 'Equipment', path: '/staff/equipment' },
+  { id: 'operatingRooms', label: 'Operating rooms', path: '/staff/operating-rooms' },
   { id: 'hospitals', label: 'Hospitals', path: '/staff/hospitals' },
   { id: 'users', label: 'Users and roles', path: '/staff/users' },
 ]
@@ -32,9 +33,26 @@ type Access = 'view' | 'edit'
  * Keep identical to ACCESS in backend/apps/accounts/permissions.py: the API enforces it, this only hides things.
  */
 const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
-  admin: { overview: 'view', beds: 'edit', blood: 'edit', pharmacy: 'edit', equipment: 'edit', hospitals: 'edit', users: 'edit' },
-  doctor: { overview: 'view', beds: 'view', blood: 'view', pharmacy: 'view', equipment: 'view', hospitals: 'view' },
-  nurse: { overview: 'view', beds: 'edit', pharmacy: 'view', equipment: 'edit', hospitals: 'view' },
+  admin: {
+    overview: 'view',
+    beds: 'edit',
+    blood: 'edit',
+    pharmacy: 'edit',
+    equipment: 'edit',
+    operatingRooms: 'edit',
+    hospitals: 'edit',
+    users: 'edit',
+  },
+  doctor: {
+    overview: 'view',
+    beds: 'view',
+    blood: 'view',
+    pharmacy: 'view',
+    equipment: 'view',
+    operatingRooms: 'view',
+    hospitals: 'view',
+  },
+  nurse: { overview: 'view', beds: 'edit', pharmacy: 'view', equipment: 'edit', operatingRooms: 'edit', hospitals: 'view' },
   bloodBank: { overview: 'view', blood: 'edit', hospitals: 'view' },
   pharmacist: { overview: 'view', pharmacy: 'edit', hospitals: 'view' },
 }

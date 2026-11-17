@@ -40,6 +40,7 @@ from apps.hospitals.models import (
     StorageLocation,
     Ward,
 )
+from apps.operating_rooms.models import OperatingRoom, OrStatus
 from apps.pharmacy.models import Batch, Medicine
 
 DEMO_PASSWORD = "CityCare-demo-1"
@@ -512,6 +513,7 @@ class Command(BaseCommand):
         if reset:
             models = (
                 Equipment,
+                OperatingRoom,
                 Bed,
                 DonationAppointment,
                 BloodUnit,
@@ -540,6 +542,9 @@ class Command(BaseCommand):
         BloodUnit.objects.filter(hospital=None).update(hospital=main)
         if not Equipment.objects.exists():
             self.seed_equipment(main)
+        for hospital in hospitals:
+            if not OperatingRoom.objects.filter(hospital=hospital).exists():
+                self.seed_operating_rooms(hospital)
         if not Donor.objects.exists():
             # Own random stream, so adding donors doesn't change any of the data seeded before Sprint 3.
             self.seed_donors(random.Random(seed * 1000), now, main)
@@ -772,6 +777,19 @@ class Command(BaseCommand):
         Equipment.objects.bulk_create(
             Equipment(hospital=hospital, identifier=i, equipment_type=t, name=n, location=loc, status=st)
             for i, t, n, loc, st in items
+        )
+
+    def seed_operating_rooms(self, hospital: Hospital):
+        """Story #28: three rooms with different capabilities and statuses in each demo hospital."""
+        St = OrStatus
+        rooms = [
+            ("OR 1", ["general"], "Block B, floor 2", St.AVAILABLE),
+            ("Cardiac theatre", ["cardiac", "general"], "Block B, floor 3", St.IN_USE),
+            ("Trauma theatre", ["general", "neuro", "trauma"], "Emergency block, floor 1", St.CLEANING),
+        ]
+        OperatingRoom.objects.bulk_create(
+            OperatingRoom(hospital=hospital, name=n, capabilities=caps, location=loc, status=st)
+            for n, caps, loc, st in rooms
         )
 
     def seed_pharmacy(self, now):

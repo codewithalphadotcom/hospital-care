@@ -3,11 +3,13 @@ import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
+import type { OperatingRoom, OperatingRoomAction, OperatingRoomInput, OrCapability } from '../api/operatingRooms'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
 import type { UserSummary } from '../api/users'
 import { applyAction } from '../features/beds/beds'
 import { applyEquipmentAction } from '../features/equipment/equipment'
+import { applyOperatingRoomAction } from '../features/operatingRooms/operatingRooms'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
@@ -16,7 +18,7 @@ import { sampleMedicines } from './fixtures/pharmacy'
 import { samplePublicStatus } from './fixtures/publicStatus'
 
 export type Reply = { status?: number; body?: unknown }
-type Request = { params: Record<string, string>; body: unknown }
+type Request = { params: Record<string, string>; body: unknown; query: URLSearchParams }
 type Route = Reply | ((request: Request) => Reply)
 
 export const ok = (body?: unknown): Reply => ({ status: 200, body })
@@ -41,14 +43,15 @@ function match(pattern: string, path: string): Record<string, string> | null {
  */
 export function mockApi(routes: Record<string, Route>) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const path = new URL(String(input)).pathname.replace(/^\/api/, '')
+    const url = new URL(String(input))
+    const path = url.pathname.replace(/^\/api/, '')
     const method = (init?.method ?? 'GET').toUpperCase()
     for (const [key, route] of Object.entries(routes)) {
       const [routeMethod, pattern] = key.split(' ')
       const params = routeMethod === method ? match(pattern, path) : null
       if (!params) continue
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
-      const reply = typeof route === 'function' ? route({ params, body }) : route
+      const reply = typeof route === 'function' ? route({ params, body, query: url.searchParams }) : route
       const status = reply.status ?? 200
       return new Response(status === 204 ? null : JSON.stringify(reply.body ?? {}), { status })
     }
@@ -107,6 +110,18 @@ export function sampleEquipment(now: Date): Equipment[] {
   ]
 }
 
+/** A few operating rooms across capabilities and statuses, sorted by name as the server returns them (story #28). */
+export function sampleOperatingRooms(now: Date): OperatingRoom[] {
+  const at = now.toISOString()
+  const room = (id: number, name: string, capabilities: OrCapability[], status: OperatingRoom['status'], location: string) =>
+    ({ id, name, capabilities, status, location, statusSince: at, hospital: 'CityCare General Hospital' }) satisfies OperatingRoom
+  return [
+    room(1, 'Cardiac theatre', ['cardiac', 'general'], 'inUse', 'Block B, floor 3'),
+    room(2, 'OR 1', ['general'], 'available', 'Block B, floor 2'),
+    room(3, 'Trauma theatre', ['general', 'neuro', 'trauma'], 'cleaning', 'Emergency block, floor 1'),
+  ]
+}
+
 export function mockStaffApi({ role, erDown = false, board: customBoard, publicStatus, networkDown = false }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -114,6 +129,7 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
   const hospitals = sampleHospitals()
   const users = sampleUsers()
   const equipment = sampleEquipment(now)
+  const rooms = sampleOperatingRooms(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
   /** Like gate, but the reply sees the request, and `networkDown` fails it. Reads need view, writes need edit. */
@@ -223,6 +239,40 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
         return fail(409, { detail: (error as Error).message })
       }
       return ok(equipment[index])
+    }),
+    'GET /operating-rooms/': view('operatingRooms', ({ query }) => {
+      const capability = query.get('capability')
+      const status = query.get('status')
+      return ok(
+        rooms.filter(
+          (r) => (!capability || r.capabilities.includes(capability as OrCapability)) && (!status || r.status === status),
+        ),
+      )
+    }),
+    'POST /operating-rooms/': edit('operatingRooms', ({ body }) => {
+      const input = body as OperatingRoomInput
+      if (rooms.some((r) => r.name.toLowerCase() === input.name.toLowerCase())) {
+        return fail(400, { name: ['A room with this name is already registered in your hospital.'] })
+      }
+      const created: OperatingRoom = {
+        ...input,
+        capabilities: [...new Set(input.capabilities)].sort(),
+        id: nextId++,
+        statusSince: now.toISOString(),
+        hospital: 'CityCare General Hospital',
+      }
+      rooms.push(created)
+      return { status: 201, body: created }
+    }),
+    'POST /operating-rooms/:id/actions/': edit('operatingRooms', ({ params, body }) => {
+      const index = rooms.findIndex((r) => r.id === Number(params.id))
+      if (index < 0) return fail(404)
+      try {
+        rooms[index] = applyOperatingRoomAction(rooms[index], (body as { action: OperatingRoomAction }).action, new Date())
+      } catch (error) {
+        return fail(409, { detail: (error as Error).message })
+      }
+      return ok(rooms[index])
     }),
     'POST /hospitals/': edit('hospitals', ({ body }) => {
       const input = body as HospitalInput

@@ -12,14 +12,14 @@ unknown id, **400** `{field: ["message"]}` for invalid input.
 `ACCESS` in `backend/apps/accounts/permissions.py` and `frontend/src/features/staff/roles.ts` must stay
 identical. Reads need *view*, writes need *edit*.
 
-| Role | overview | beds | blood | pharmacy | hospitals | users |
-|---|---|---|---|---|---|---|
-| admin | view | edit | edit | edit | edit | edit |
-| doctor | view | view | view | view | view | – |
-| nurse | view | edit | – | view | view | – |
-| bloodBank | view | – | edit | – | view | – |
-| pharmacist | view | – | – | edit | view | – |
-| patient | – | – | – | – | – | – |
+| Role | overview | beds | blood | pharmacy | hospitals | users | equipment | operatingRooms |
+|---|---|---|---|---|---|---|---|---|
+| admin | view | edit | edit | edit | edit | edit | edit | edit |
+| doctor | view | view | view | view | view | – | view | view |
+| nurse | view | edit | – | view | view | – | edit | edit |
+| bloodBank | view | – | edit | – | view | – | – | – |
+| pharmacist | view | – | – | edit | view | – | – | – |
+| patient | – | – | – | – | – | – | – | – |
 
 **Own hospital only:** a user who isn't an admin may change a resource only if it belongs to their own
 hospital (`resource.hospital == user.hospital`); otherwise **403**. Admins manage the whole network.

@@ -18,6 +18,7 @@ ACCESS: dict[str, dict[str, str]] = {
         "hospitals": EDIT,
         "users": EDIT,
         "equipment": EDIT,
+        "operatingRooms": EDIT,
     },
     Role.DOCTOR: {
         "overview": VIEW,
@@ -26,6 +27,7 @@ ACCESS: dict[str, dict[str, str]] = {
         "pharmacy": VIEW,
         "hospitals": VIEW,
         "equipment": VIEW,
+        "operatingRooms": VIEW,
     },
     Role.NURSE: {
         "overview": VIEW,
@@ -33,6 +35,7 @@ ACCESS: dict[str, dict[str, str]] = {
         "pharmacy": VIEW,
         "hospitals": VIEW,
         "equipment": EDIT,
+        "operatingRooms": EDIT,
     },
     Role.BLOOD_BANK: {"overview": VIEW, "blood": EDIT, "hospitals": VIEW},
     Role.PHARMACIST: {"overview": VIEW, "pharmacy": EDIT, "hospitals": VIEW},
