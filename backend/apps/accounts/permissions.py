@@ -18,6 +18,9 @@ ACCESS: dict[str, dict[str, str]] = {
         "pharmacy": EDIT,
         "hospitals": EDIT,
         "users": EDIT,
+        "equipment": EDIT,
+        "operatingRooms": EDIT,
+        "orBookings": EDIT,
     },
     Role.DOCTOR: {
         "overview": VIEW,
@@ -26,10 +29,32 @@ ACCESS: dict[str, dict[str, str]] = {
         "blood": VIEW,
         "pharmacy": VIEW,
         "hospitals": VIEW,
+        "equipment": VIEW,
+        "operatingRooms": VIEW,
+        "orBookings": EDIT,  # surgeons book their own slots; the room registry stays admin/nurse
     },
-    Role.NURSE: {"overview": VIEW, "emergencies": EDIT, "beds": EDIT, "pharmacy": VIEW, "hospitals": VIEW},
-    Role.BLOOD_BANK: {"overview": VIEW, "emergencies": VIEW, "blood": EDIT, "hospitals": VIEW},
-    Role.PHARMACIST: {"overview": VIEW, "emergencies": VIEW, "pharmacy": EDIT, "hospitals": VIEW},
+    Role.NURSE: {
+        "overview": VIEW,
+        "emergencies": EDIT,
+        "beds": EDIT,
+        "pharmacy": VIEW,
+        "hospitals": VIEW,
+        "equipment": EDIT,
+        "operatingRooms": EDIT,
+        "orBookings": EDIT,
+    },
+    Role.BLOOD_BANK: {
+        "overview": VIEW,
+        "emergencies": VIEW,
+        "blood": EDIT,
+        "hospitals": VIEW,
+    },
+    Role.PHARMACIST: {
+        "overview": VIEW,
+        "emergencies": VIEW,
+        "pharmacy": EDIT,
+        "hospitals": VIEW,
+    },
     Role.PATIENT: {},
 }
 

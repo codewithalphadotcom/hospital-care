@@ -295,6 +295,108 @@ FeedNeed = { type: 'blood', group, component, quantity: number, fulfilled: numbe
 - **Queries:** a fixed number, whatever the number of cases: the sweep's check, the cases with their hospitals, and
   their needs.
 
+## Equipment (Sprint 4)
+
+Critical equipment that can be located and shared (#26). Access: admin and nurse **edit**, doctor **view**; other
+roles 403. Staff see only their own hospital's equipment; every registration is audit-logged.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/equipment/?type=&status=&q=` | – | `Equipment[]` (`q` searches asset tag, make/model and location) |
+| POST | `/equipment/` | `{identifier, type, name?, location, status?}` | 201 `Equipment` |
+| POST | `/equipment/<id>/actions/` | `{action, reason?}` | 200 `Equipment` (#27) |
+
+```ts
+Equipment = {
+  id: number, identifier: string,   // asset tag, stored upper-case, unique within a hospital (400 otherwise)
+  type: 'ventilator' | 'monitor' | 'defibrillator' | 'dialysis',
+  name: string, location: string,
+  status: 'available' | 'inUse' | 'maintenance' | 'outOfService',  // defaults to available
+  statusSince: string, hospital: string | null
+}
+```
+
+Equipment actions (#27): `use`, `release`, `startMaintenance`, `finishMaintenance`, `outOfService`,
+`returnToService`. The lifecycle is in `apps/equipment/models.py`. A move it doesn't allow (e.g. using equipment
+that is in maintenance) returns **409** and changes nothing. Unknown action → 400; equipment outside the user's
+hospital → 404. Every change is audit-logged (`equipment.status_changed`) with the optional `reason`.
+`Equipment.objects.matchable()` returns only `available` items; the matching engine uses it so in-use,
+maintenance and out-of-service equipment is never matched.
+
+## Operating rooms (Sprint 4)
+
+Operating rooms and what each is equipped for (#28). Access: admin and nurse **edit**, doctor **view**; other
+roles 403. Staff see only their own hospital's rooms; every registration is audit-logged. Bookings (#29) below.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/operating-rooms/?capability=&status=&q=` | – | `OperatingRoom[]` (`q` searches name and location; an unknown `capability` or `status` is ignored) |
+| POST | `/operating-rooms/` | `{name, capabilities, location?, status?}` | 201 `OperatingRoom` |
+| POST | `/operating-rooms/<id>/actions/` | `{action, reason?}` | 200 `OperatingRoom` (#28) |
+
+```ts
+OperatingRoom = {
+  id: number, name: string,   // e.g. "OR 1"; unique within a hospital, any case (400 otherwise)
+  capabilities: ('general' | 'cardiac' | 'trauma' | 'neuro' | 'orthopedic' | 'obstetric' | 'pediatric')[],
+                              // at least one (400 otherwise); stored sorted, without repeats
+  location: string,           // e.g. "Block B, floor 2", may be empty
+  status: 'available' | 'inUse' | 'cleaning' | 'maintenance' | 'outOfService',  // defaults to available
+  statusSince: string, hospital: string | null
+}
+```
+
+Actions: `startCase`, `finishCase`, `finishCleaning`, `startMaintenance`, `finishMaintenance`, `outOfService`,
+`returnToService`. The lifecycle is in `apps/operating_rooms/models.py`. A move it doesn't allow returns **409**
+and changes nothing. Unknown action → 400. A room outside the user's hospital → 404 (admins can change any
+hospital's room). Registration is audit-logged as `operatingroom.registered`; status changes as
+`operatingroom.status_changed` (the shared `change_status` helper names them after the model).
+`OperatingRoom.objects.matchable()` returns only `available` rooms, and `with_capability(code)` filters by capability.
+
+### Bookings and the day schedule (story #29)
+
+Booking a slot is open to admin, nurse and doctor (`orBookings`: edit); the day view needs `operatingRooms` view.
+Other roles get 403. Same own-hospital rule: another hospital's room is **404**.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/operating-rooms/schedule/?date=YYYY-MM-DD` | – | `Schedule` (`date` defaults to today, local time; a bad date → 400) |
+| POST | `/operating-rooms/bookings/` | `{roomId, startsAt, endsAt, procedure, surgeon?, patientInitials?}` | 201 `Booking` |
+| POST | `/operating-rooms/bookings/<id>/cancel/` | – | 200 `Booking`, now `cancelled`; 409 if it already is; 403 for someone else's booking unless admin or nurse |
+
+```ts
+Schedule = { date: string, rooms: { id, name, status, capabilities, bookings: Booking[] }[] }
+   // every room in the user's hospital (every room for a user without one), by name
+Booking = {
+  id: number, roomId: number,
+  startsAt: string, endsAt: string,   // ISO 8601 with offset, e.g. "2030-01-15T09:00:00+05:00"
+  procedure: string, surgeon: string, patientInitials: string,  // surgeon and initials may be ""
+  status: 'booked' | 'cancelled', bookedBy: string                // bookedBy is the booker's full name
+  canCancel: boolean   // admins and nurses can cancel any booking, others (surgeons) only their own
+}
+```
+
+- **Half-open times.** A booking covers `[startsAt, endsAt)`: 10:00–11:00 and 11:00–12:00 in the same room are
+  both allowed. A booking must end after it starts, last at most 24 hours, and start in the future (5 minutes of
+  slack). An out-of-service room is refused (400).
+- **Overlaps are refused twice.** The service locks the room row and answers **400**
+  `{"startsAt": ["OR 1 is already booked from 10:00 to 11:00."]}` (times in local time). The database
+  backstops it with an exclusion constraint on `operating_rooms_orbooking` (PostgreSQL only; SQLite can't
+  express it, so the migration skips it there):
+
+  ```sql
+  EXCLUDE USING GIST (
+    (int8range(room_id, room_id, '[]')) WITH &&,
+    (tstzrange(starts_at, ends_at, '[)')) WITH &&
+  ) WHERE (status = 'booked')
+  ```
+
+  Two range expressions stand in for `btree_gist`'s room `=`, so the extension isn't needed. Cancelled rows are
+  outside the condition, so a cancelled slot can be booked again. A `CHECK (ends_at > starts_at)` covers every
+  backend.
+- Booking and cancelling are audit-logged as `orbooking.created` and `orbooking.cancelled`. Cancelling keeps the row.
+- The schedule lists only `booked` slots that overlap the local calendar day, in time order. A slot that runs past
+  midnight appears on both days.
+
 ## Demo data
 
 ```bash
@@ -304,6 +406,7 @@ docker compose exec backend python manage.py seed_demo --reset  # start the demo
 
 Creates 3 hospitals (CityCare General, Seaview, Northside Children's) with 10 departments, 12 wards / 164 beds
 (ICU, emergency, general, isolation and NICU) and 10 storage locations, plus 320 blood units (with screening results), 60 synthetic donors (two deferred) and 6 upcoming donation
-appointments, 23 medicines, 14 doctor shifts, the ER status, and one login per
+appointments, 23 medicines, 14 doctor shifts, three operating rooms per hospital with a few bookings today and
+tomorrow, the ER status, and one login per
 role (`admin@`, `doctor@`, `nurse@`, `bloodbank@`, `pharmacist@`, `patient@demo.citycare.pk`, password
 `CityCare-demo-1`). Demo only: never run it against real data.

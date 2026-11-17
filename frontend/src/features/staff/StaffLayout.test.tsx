@@ -65,7 +65,7 @@ describe('StaffLayout', () => {
     mockStaffApi({ role: 'admin' })
     renderAt('/staff/beds')
     expect(await screen.findByText('beds content')).toBeInTheDocument()
-    expect(navLinks()).toEqual(['Overview', 'Emergencies', 'Beds', 'Blood bank', 'Pharmacy', 'Hospitals', 'Users and roles'])
+    expect(navLinks()).toEqual(['Overview', 'Emergencies', 'Beds', 'Blood bank', 'Pharmacy', 'Equipment', 'Operating rooms', 'Hospitals', 'Users and roles'])
     expect(screen.getByRole('link', { name: 'Beds' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('Sadia Admin')).toBeInTheDocument()
   })
@@ -101,6 +101,19 @@ describe('StaffLayout', () => {
     renderAt('/staff/hospitals/1/edit')
     expect(await screen.findByText('hospitals content')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Hospitals' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['admin', true],
+    ['doctor', true],
+    ['nurse', true],
+    ['bloodBank', false],
+    ['pharmacist', false],
+  ] as const)('shows Operating rooms to %s: %s', async (role, shown) => {
+    mockStaffApi({ role })
+    renderAt('/staff')
+    await screen.findByText('overview content')
+    expect(navLinks().includes('Operating rooms')).toBe(shown)
   })
 
   it('shows the hospital the signed-in user works at', async () => {

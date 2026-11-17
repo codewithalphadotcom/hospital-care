@@ -3,12 +3,24 @@ import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
 import type { CaseAction, CaseInput, CaseStatus, EmergencyCase, EmergencyCaseDetail, FeedEntry, Severity, StatusChange } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
+import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
+import type {
+  OperatingRoom,
+  OperatingRoomAction,
+  OperatingRoomInput,
+  OrBooking,
+  OrBookingInput,
+  OrCapability,
+} from '../api/operatingRooms'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
 import type { UserSummary } from '../api/users'
 import { applyAction } from '../features/beds/beds'
 import { actionsFor, nextStatus, STATUS_LABEL } from '../features/emergencies/emergencies'
+import { applyEquipmentAction } from '../features/equipment/equipment'
+import { applyOperatingRoomAction } from '../features/operatingRooms/operatingRooms'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
+import { dateKey } from '../lib/time'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
 import { sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
@@ -120,6 +132,57 @@ type StaffApiOptions = {
   feed?: FeedEntry[]
 }
 
+/** A few pieces of equipment across types and statuses (story #26). */
+export function sampleEquipment(now: Date): Equipment[] {
+  const at = now.toISOString()
+  const item = (id: number, identifier: string, type: Equipment['type'], status: Equipment['status'], location: string) =>
+    ({ id, identifier, type, status, location, name: '', statusSince: at, hospital: 'CityCare General Hospital' }) satisfies Equipment
+  return [
+    item(1, 'VENT-001', 'ventilator', 'inUse', 'ICU bay 1'),
+    item(2, 'VENT-002', 'ventilator', 'available', 'ICU bay 2'),
+    item(3, 'VENT-003', 'ventilator', 'maintenance', 'HDU'),
+    item(4, 'DEFIB-001', 'defibrillator', 'available', 'Emergency department'),
+    item(5, 'DIAL-001', 'dialysis', 'outOfService', 'Dialysis unit'),
+  ]
+}
+
+/** A few operating rooms across capabilities and statuses, sorted by name as the server returns them (story #28). */
+export function sampleOperatingRooms(now: Date): OperatingRoom[] {
+  const at = now.toISOString()
+  const room = (id: number, name: string, capabilities: OrCapability[], status: OperatingRoom['status'], location: string) =>
+    ({ id, name, capabilities, status, location, statusSince: at, hospital: 'CityCare General Hospital' }) satisfies OperatingRoom
+  return [
+    room(1, 'Cardiac theatre', ['cardiac', 'general'], 'inUse', 'Block B, floor 3'),
+    room(2, 'OR 1', ['general'], 'available', 'Block B, floor 2'),
+    room(3, 'Trauma theatre', ['general', 'neuro', 'trauma'], 'cleaning', 'Emergency block, floor 1'),
+  ]
+}
+
+/** Today's bookings (story #29): two in OR 1 with a gap before the next, one in Cardiac theatre. Times in Karachi. */
+export function sampleOrBookings(now: Date): OrBooking[] {
+  const day = dateKey(now)
+  const slot = (id: number, roomId: number, start: string, end: string, procedure: string, surgeon: string): OrBooking => ({
+    id,
+    roomId,
+    startsAt: `${day}T${start}:00+05:00`,
+    endsAt: `${day}T${end}:00+05:00`,
+    procedure,
+    surgeon,
+    patientInitials: 'A.K.',
+    status: 'booked',
+    bookedBy: 'Hina Javed',
+    canCancel: true,
+  })
+  return [
+    slot(1, 1, '09:00', '13:00', 'CABG', 'Dr. Ayesha Khan'),
+    slot(2, 2, '08:00', '10:00', 'Appendicectomy', 'Dr. Bilal Ahmed'),
+    slot(3, 2, '10:00', '12:30', 'Cholecystectomy', 'Dr. Bilal Ahmed'),
+  ]
+}
+
+/** "+05:00"-stamped time as HH:MM, the way the server words a clash. */
+const clock = (iso: string) => iso.slice(11, 16)
+
 export function mockStaffApi({
   role,
   erDown = false,
@@ -163,7 +226,10 @@ export function mockStaffApi({
       outcome: closes.length ? closes[closes.length - 1].note : null,
     }
   }
-  const gate =(module: Module, reply: () => Reply): Route => () =>
+  const equipment = sampleEquipment(now)
+  const rooms = sampleOperatingRooms(now)
+  const bookings = sampleOrBookings(now)
+  const gate = (module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
   /** Like gate, but the reply sees the request, and `networkDown` fails it. Reads need view, writes need edit. */
   const allowed =
@@ -309,6 +375,99 @@ export function mockStaffApi({
     // Before /hospitals/:id/, which would otherwise match it.
     'GET /hospitals/capabilities/': view('hospitals', () => ok(sampleCapabilities)),
     'GET /hospitals/': view('hospitals', () => ok(hospitals)),
+    'GET /equipment/': view('equipment', () => ok(equipment)),
+    'POST /equipment/': edit('equipment', ({ body }) => {
+      const input = body as EquipmentInput
+      const tag = input.identifier.toUpperCase()
+      if (equipment.some((e) => e.identifier === tag)) {
+        return fail(400, { identifier: ['This asset tag is already registered in your hospital.'] })
+      }
+      const created: Equipment = { ...input, identifier: tag, id: nextId++, statusSince: now.toISOString(), hospital: 'CityCare General Hospital' }
+      equipment.push(created)
+      return { status: 201, body: created }
+    }),
+    'POST /equipment/:id/actions/': edit('equipment', ({ params, body }) => {
+      const index = equipment.findIndex((e) => e.id === Number(params.id))
+      if (index < 0) return fail(404)
+      try {
+        equipment[index] = applyEquipmentAction(equipment[index], (body as { action: EquipmentAction }).action, new Date())
+      } catch (error) {
+        return fail(409, { detail: (error as Error).message })
+      }
+      return ok(equipment[index])
+    }),
+    'GET /operating-rooms/': view('operatingRooms', ({ query }) => {
+      const capability = query.get('capability')
+      const status = query.get('status')
+      return ok(
+        rooms.filter(
+          (r) => (!capability || r.capabilities.includes(capability as OrCapability)) && (!status || r.status === status),
+        ),
+      )
+    }),
+    'POST /operating-rooms/': edit('operatingRooms', ({ body }) => {
+      const input = body as OperatingRoomInput
+      if (rooms.some((r) => r.name.toLowerCase() === input.name.toLowerCase())) {
+        return fail(400, { name: ['A room with this name is already registered in your hospital.'] })
+      }
+      const created: OperatingRoom = {
+        ...input,
+        capabilities: [...new Set(input.capabilities)].sort(),
+        id: nextId++,
+        statusSince: now.toISOString(),
+        hospital: 'CityCare General Hospital',
+      }
+      rooms.push(created)
+      return { status: 201, body: created }
+    }),
+    'GET /operating-rooms/schedule/': view('operatingRooms', ({ query }) => {
+      const date = query.get('date') ?? dateKey(now)
+      return ok({
+        date,
+        rooms: rooms.map((room) => ({
+          id: room.id,
+          name: room.name,
+          status: room.status,
+          capabilities: room.capabilities,
+          bookings: bookings
+            .filter((b) => b.roomId === room.id && b.status === 'booked' && b.startsAt.startsWith(date))
+            .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+            // Same rule as the server: admins and nurses cancel any booking, others only their own.
+            .map((b) => ({ ...b, canCancel: role === 'admin' || role === 'nurse' || b.bookedBy === NAMES[role!] })),
+        })),
+      })
+    }),
+    'POST /operating-rooms/bookings/': edit('orBookings', ({ body }) => {
+      const input = body as OrBookingInput
+      const room = rooms.find((r) => r.id === input.roomId)
+      if (!room) return fail(400, { roomId: ['Pick a room.'] })
+      const clash = bookings.find(
+        (b) => b.roomId === room.id && b.status === 'booked' && b.startsAt < input.endsAt && b.endsAt > input.startsAt,
+      )
+      if (clash) {
+        return fail(400, { startsAt: [`${room.name} is already booked from ${clock(clash.startsAt)} to ${clock(clash.endsAt)}.`] })
+      }
+      const created: OrBooking = { ...input, id: nextId++, status: 'booked', bookedBy: NAMES.nurse, canCancel: true }
+      bookings.push(created)
+      return { status: 201, body: created }
+    }),
+    'POST /operating-rooms/bookings/:id/cancel/': edit('orBookings', ({ params }) => {
+      const booking = bookings.find((b) => b.id === Number(params.id))
+      if (!booking) return fail(404)
+      if (booking.status === 'cancelled') return fail(409, { detail: 'This booking is already cancelled.' })
+      booking.status = 'cancelled'
+      return ok(booking)
+    }),
+    'POST /operating-rooms/:id/actions/': edit('operatingRooms', ({ params, body }) => {
+      const index = rooms.findIndex((r) => r.id === Number(params.id))
+      if (index < 0) return fail(404)
+      try {
+        rooms[index] = applyOperatingRoomAction(rooms[index], (body as { action: OperatingRoomAction }).action, new Date())
+      } catch (error) {
+        return fail(409, { detail: (error as Error).message })
+      }
+      return ok(rooms[index])
+    }),
     'POST /hospitals/': edit('hospitals', ({ body }) => {
       const input = body as HospitalInput
       if (hospitals.some((h) => h.name.toLowerCase() === input.name.toLowerCase())) {
