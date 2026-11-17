@@ -78,6 +78,8 @@ def _stock_key(item: RequestItem) -> tuple:
         return ("blood", item.blood_group, item.component)
     if item.resource_type == ResourceType.EQUIPMENT:
         return ("equipment", item.equipment_type)
+    if item.resource_type == ResourceType.OPERATING_ROOM:
+        return ("operatingRoom", item.capability)
     return ("bed", item.bed_type)
 
 
