@@ -1,5 +1,6 @@
 """Story #38 acceptance: the search over the seeded demo network returns in under a second, in a fixed number
 of queries. Seeded data, as a demo sees it: a case at the second hospital, one need of each of the four types.
+Story #41 adds the ranking and the serialising of the scores to the same budget: scoring is pure Python.
 """
 
 import time
@@ -9,6 +10,7 @@ import pytest
 from django.core.management import call_command
 
 from apps.emergencies.models import EmergencyRequest, RequestItem
+from apps.emergencies.serializers import CandidateItemSerializer
 from apps.hospitals.models import Hospital
 from apps.matching.candidates import candidates_for_case
 
@@ -39,8 +41,10 @@ def test_candidates_for_one_need_of_each_type_on_seeded_data_are_fast_and_bounde
     started = time.perf_counter()
     with django_assert_max_num_queries(QUERY_BUDGET):
         found = candidates_for_case(case)
+        payload = CandidateItemSerializer(found, many=True).data
     elapsed = time.perf_counter() - started
 
     assert elapsed < SECONDS, f"candidates_for_case took {elapsed:.3f}s"
     assert [entry.item.resource_type for entry in found] == ["blood", "bed", "equipment", "operatingRoom"]
     assert all(entry.candidates for entry in found), "every type should find a hospital with stock"
+    assert all(item["candidates"][0]["rank"] == 1 for item in payload)
