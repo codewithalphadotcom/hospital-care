@@ -5,7 +5,8 @@
 
 ## Units of work
 
-Break the spec into small, independently reviewable units. Each unit should map to roughly one PR.
+Break the spec into small, independently reviewable units, each small enough to review on its own in
+the weekly PR.
 
 | Unit | Description | Files touched | Tests |
 |---|---|---|---|
@@ -23,5 +24,5 @@ checks must be green).
 
 ## Review
 
-Each unit's PR requires reviewer approval per [CONTRIBUTING.md](../../../CONTRIBUTING.md) before
-merge — that approval is the Construction gate.
+Each unit is reviewed in the developer's weekly PR and again at the weekly integration PR, per
+[CONTRIBUTING.md](../../../CONTRIBUTING.md). Those approvals are the Construction gate.

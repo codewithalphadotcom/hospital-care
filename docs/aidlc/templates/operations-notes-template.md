@@ -1,7 +1,7 @@
 # Operations Notes: <feature name>
 
 **Construction plan:** [docs/aidlc/construction/<file>.md](../construction/<file>.md)
-**Merged:** <date / PR link>
+**Merged to `main`:** <date / integration PR link>
 **Deployed to staging:** <date>
 
 ## Outcome

@@ -11,6 +11,7 @@ Closes #<!-- issue number -->
 
 ## Definition of Done checklist
 - [ ] Acceptance criteria in the linked issue are met
+- [ ] Feature work: the [AIDLC](../docs/aidlc/README.md) Inception spec is approved and the code matches its Construction plan
 - [ ] Unit/API tests added or updated, and CI is green
 - [ ] Migrations included and described here (if models changed)
 - [ ] Docs/README updated (if behaviour or setup changed)

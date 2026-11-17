@@ -32,11 +32,11 @@ Built for the **Agile Software Project Management** course using Scrum, with 1-w
 ```
 backend/            Django project
   config/           settings, root URLs
-  apps/             one Django app per module (accounts, hospitals, resources, blood,
+  apps/             one Django app per module (accounts, hospitals, resources, blood, pharmacy,
                     emergencies, matching, transfers, notifications, audit, core)
 frontend/           React app (src/pages, src/api, ...)
 docs/               process, product, architecture and course deliverables
-scripts/            backlog + GitHub sync tooling
+scripts/            backlog + GitHub sync tooling, CI consistency checks
 .github/            CI, issue/PR templates, Discord reminder workflow
 ```
 
@@ -100,6 +100,7 @@ API at `VITE_API_URL` (default `http://localhost:8000/api`), so both servers mus
 ### Checks to run before pushing (CI runs the same ones)
 
 ```bash
-cd backend && ruff check . && ruff format --check . && pytest
+python scripts/check_deploy_config.py && python scripts/check_shared_rules.py
+cd backend && ruff check . && ruff format --check . && python manage.py makemigrations --check --dry-run && pytest
 cd frontend && npm run lint && npm test && npm run build
 ```
