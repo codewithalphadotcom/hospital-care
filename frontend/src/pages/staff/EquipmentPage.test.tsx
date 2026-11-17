@@ -100,4 +100,21 @@ describe('EquipmentPage (story #26 Equipment registry)', () => {
     expect(within(table).queryByRole('columnheader', { name: 'Change status' })).not.toBeInTheDocument()
     expect(within(table).queryAllByRole('button')).toHaveLength(0)
   })
+
+  it('holds a piece of equipment for a case, then cancels the hold (story #43)', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/equipment')
+    await screen.findByRole('table', { name: 'Equipment' })
+    await userEvent.click(screen.getByRole('button', { name: 'Reserve VENT-002' }))
+    expect(await screen.findByText('VENT-002 is now reserved')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/equipment/2/actions/'),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ action: 'reserve' }) }),
+    )
+    const row = screen.getByRole('rowheader', { name: 'VENT-002' }).closest('tr') as HTMLElement
+    expect(within(row).getByText('Reserved')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Mark in use VENT-002' })).toBeInTheDocument()
+    await userEvent.click(within(row).getByRole('button', { name: 'Cancel reservation VENT-002' }))
+    expect(await within(row).findByText('Available')).toBeInTheDocument()
+  })
 })
