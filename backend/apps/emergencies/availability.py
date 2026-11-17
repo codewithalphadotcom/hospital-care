@@ -13,7 +13,7 @@ from apps.blood.models import BloodUnit
 from apps.blood.services import usable_units
 from apps.equipment.models import Equipment
 from apps.hospitals.models import Bed, BedStatus
-from apps.matching.models import ACTIVE, ReservationStatus
+from apps.matching.models import ReservationStatus
 from apps.operating_rooms.models import OperatingRoom
 
 from .models import EmergencyRequest, RequestItem, ResourceType
@@ -52,7 +52,6 @@ def local_availability(case: EmergencyRequest) -> list[ItemAvailability]:
     two capabilities covers one line, not both."""
     items = list(
         case.items.annotate(
-            active=Count("reservations", filter=Q(reservations__status__in=ACTIVE)),
             held=Count("reservations", filter=Q(reservations__status=ReservationStatus.HELD)),
         ).order_by("id")
     )
@@ -62,7 +61,8 @@ def local_availability(case: EmergencyRequest) -> list[ItemAvailability]:
     counts, rooms = stock.counts, stock.rooms
     rows = []
     for item in items:
-        need = max(0, item.quantity - item.fulfilled - item.active)
+        # An allocated hold is already in fulfilled (story #45), so only the held ones come off here.
+        need = max(0, item.quantity - item.fulfilled - item.held)
         if item.resource_type == ResourceType.OPERATING_ROOM:
             matching = [room for room in rooms if item.capability in room[1]]
             available = len(matching)

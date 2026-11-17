@@ -104,7 +104,7 @@ class CaseDetailView(APIView):
         escalate_overdue()  # Story #35: the same request-time sweep as the list.
         release_expired()  # Story #43: expired holds go back to stock before the figures are worked out.
         case = get_object_or_404(own_hospital(case_detail_queryset(), request.user), reference=reference)
-        return Response(CaseDetailSerializer(case).data)
+        return Response(CaseDetailSerializer(case, context={"user": request.user}).data)
 
 
 class EmergencyFeedView(APIView):
@@ -172,7 +172,8 @@ class CaseActionView(APIView):
             return Response({"note": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
         except TransitionNotAllowed as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(CaseDetailSerializer(case_detail_queryset().get(pk=case.pk)).data)
+        detail = case_detail_queryset().get(pk=case.pk)
+        return Response(CaseDetailSerializer(detail, context={"user": request.user}).data)
 
 
 class CaseReservationsView(APIView):
@@ -201,7 +202,10 @@ class CaseReservationsView(APIView):
             holds = reserve(item, hospital=case.hospital, quantity=data["quantity"], actor=request.user)
         except ReservationUnavailable as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(ReservationSerializer(holds, many=True).data, status=status.HTTP_201_CREATED)
+        context = {"user": request.user}
+        return Response(
+            ReservationSerializer(holds, many=True, context=context).data, status=status.HTTP_201_CREATED
+        )
 
 
 class CaseReservationReleaseView(APIView):
@@ -223,4 +227,4 @@ class CaseReservationReleaseView(APIView):
             hold = release(hold, actor=request.user, reason="Released by staff")
         except ReservationNotHeld as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(ReservationSerializer(hold).data)
+        return Response(ReservationSerializer(hold, context={"user": request.user}).data)

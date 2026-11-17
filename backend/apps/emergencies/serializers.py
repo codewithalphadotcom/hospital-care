@@ -5,7 +5,8 @@ from rest_framework import serializers
 from apps.blood.models import BloodGroup, Component
 from apps.equipment.models import EquipmentType
 from apps.hospitals.models import BedType
-from apps.matching.models import ACTIVE, Reservation
+from apps.matching.allocations import may_allocate
+from apps.matching.models import ACTIVE, Allocation, Reservation, ReservationStatus
 from apps.matching.multi import HospitalMatch
 from apps.matching.reservations import resource_label
 from apps.matching.scoring import FACTOR_LABELS, rank, strategy_for
@@ -165,18 +166,30 @@ class StatusChangeSerializer(serializers.ModelSerializer):
 
 class ReservationSerializer(serializers.ModelSerializer):
     """One hold on a resource for a need (story #43). Shape of `CaseReservation` in
-    frontend/src/api/emergencies.ts. Reads `hospital`, `reserved_by` and `resource`: select them, so the list
-    costs no query per hold."""
+    frontend/src/api/emergencies.ts.
+
+    Reads `hospital`, `reserved_by`, `resource` and `request_item`: select them, so the list costs no
+    query per hold. `canAllocate` is for the user in the context (story #45)."""
 
     itemId = serializers.IntegerField(source="request_item_id", read_only=True)
     resource = serializers.SerializerMethodField()
     hospital = serializers.SerializerMethodField()
     expiresAt = serializers.DateTimeField(source="expires_at", read_only=True)
     reservedBy = serializers.SerializerMethodField()
+    canAllocate = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
-        fields = ["id", "itemId", "resource", "hospital", "status", "expiresAt", "reservedBy"]
+        fields = [
+            "id",
+            "itemId",
+            "resource",
+            "hospital",
+            "status",
+            "expiresAt",
+            "reservedBy",
+            "canAllocate",
+        ]
 
     def get_resource(self, hold):
         return resource_label(hold.resource)
@@ -188,12 +201,123 @@ class ReservationSerializer(serializers.ModelSerializer):
         user = hold.reserved_by
         return user.get_full_name() or user.email
 
+    def get_canAllocate(self, hold):
+        return can_allocate_hold(self.context.get("user"), hold)
+
+
+def can_allocate_hold(user, hold: Reservation) -> bool:
+    """Whether `user` may allocate this hold now: it is held, and the user may allocate its type here."""
+    if user is None or hold.status != ReservationStatus.HELD:
+        return False
+    return may_allocate(user, hold.request_item.resource_type, hold.resource)
+
+
+class AllocationSerializer(serializers.ModelSerializer):
+    """One allocation (story #45). Shape of `CaseAllocation` in frontend/src/api/emergencies.ts.
+
+    Select `hospital`, `allocated_by`, `request_item` and `resource` to avoid a query per row."""
+
+    itemId = serializers.IntegerField(source="request_item_id", read_only=True)
+    resource = serializers.SerializerMethodField()
+    hospital = serializers.SerializerMethodField()
+    allocatedBy = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Allocation
+        fields = ["id", "itemId", "resource", "hospital", "allocatedBy", "at", "note"]
+
+    def get_resource(self, allocation):
+        return resource_label(allocation.resource)
+
+    def get_hospital(self, allocation):
+        return {"id": allocation.hospital_id, "name": allocation.hospital.name}
+
+    def get_allocatedBy(self, allocation):
+        user = allocation.allocated_by
+        return user.get_full_name() or user.email
+
+
+class HeldReservationSerializer(serializers.ModelSerializer):
+    """A held reservation at the user's hospital, for the Blood page's "Reserved for cases" panel (#46).
+    Shape of `HeldReservation` in frontend/src/api/emergencies.ts. Select `request_item__request`,
+    `hospital`, `reserved_by` and `resource`."""
+
+    type = serializers.CharField(source="request_item.resource_type", read_only=True)
+    case = serializers.SerializerMethodField()
+    need = serializers.SerializerMethodField()
+    resource = serializers.SerializerMethodField()
+    expiresAt = serializers.DateTimeField(source="expires_at", read_only=True)
+    reservedBy = serializers.SerializerMethodField()
+    canAllocate = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Reservation
+        fields = [
+            "id",
+            "type",
+            "status",
+            "case",
+            "need",
+            "resource",
+            "expiresAt",
+            "reservedBy",
+            "canAllocate",
+        ]
+
+    def get_case(self, hold):
+        case = hold.request_item.request
+        return {"reference": case.reference, "severity": case.severity, "status": case.status}
+
+    def get_need(self, hold):
+        item = hold.request_item
+        return {
+            "itemId": item.pk,
+            "label": need_label(item),
+            "quantity": item.quantity,
+            "fulfilled": item.fulfilled,
+            "remaining": item.quantity - item.fulfilled,
+        }
+
+    def get_resource(self, hold):
+        return resource_label(hold.resource)
+
+    def get_reservedBy(self, hold):
+        user = hold.reserved_by
+        return user.get_full_name() or user.email
+
+    def get_canAllocate(self, hold):
+        return can_allocate_hold(self.context.get("user"), hold)
+
 
 class ReservationInputSerializer(serializers.Serializer):
     """POST /api/emergencies/<reference>/reservations/: one need of the case, and how many to hold here."""
 
     itemId = serializers.IntegerField()
     quantity = serializers.IntegerField(min_value=1)
+
+
+class AllocationInputSerializer(serializers.Serializer):
+    """POST /api/reservations/<id>/allocate/ {"note"?}: an optional note for the allocation record."""
+
+    note = serializers.CharField(max_length=MAX_NOTE, required=False, allow_blank=True, default="")
+
+
+class AllocateManySerializer(serializers.Serializer):
+    """POST /api/reservations/allocate/ {"ids": [...]}: the holds to allocate together, all or none."""
+
+    ids = serializers.ListField(child=serializers.IntegerField(min_value=1), min_length=1, max_length=50)
+
+    def validate_ids(self, ids):
+        if len(set(ids)) != len(ids):
+            raise serializers.ValidationError("Each reservation can be listed once.")
+        return ids
+
+
+class HeldQuerySerializer(serializers.Serializer):
+    """GET /api/reservations/?status=held&type=blood: the held reservations to list. Both are optional."""
+
+    status = serializers.ChoiceField(choices=[ReservationStatus.HELD], default=ReservationStatus.HELD)
+    type = serializers.ChoiceField(choices=ResourceType.choices, required=False)
 
 
 class CaseDetailSerializer(CaseSerializer):
@@ -212,12 +336,15 @@ class CaseDetailSerializer(CaseSerializer):
         fields = [*CaseSerializer.Meta.fields, "history", "actions", "outcome"]
 
     def to_representation(self, case):
+        """`self.context["user"]`, when given, decides each hold's `canAllocate` (story #45)."""
         rows = local_availability(case)  # same order as the items below: both read case.items
         data = super().to_representation(case)
         data["items"] = [
             {
                 **need,
                 "itemId": row.item.pk,
+                "fulfilled": row.item.fulfilled,
+                "remaining": row.item.quantity - row.item.fulfilled,
                 "localAvailable": row.available,
                 "shortfall": row.shortfall,
                 "reserved": row.held,
@@ -227,10 +354,16 @@ class CaseDetailSerializer(CaseSerializer):
         data["shortfallTotal"] = sum(row.shortfall for row in rows)
         holds = (
             Reservation.objects.filter(request_item__request=case, status__in=ACTIVE)
-            .select_related("hospital", "reserved_by")
+            .select_related("hospital", "reserved_by", "request_item")
             .prefetch_related("resource")
         )
-        data["reservations"] = ReservationSerializer(holds, many=True).data
+        data["reservations"] = ReservationSerializer(holds, many=True, context=self.context).data
+        allocations = (
+            Allocation.objects.filter(request=case)
+            .select_related("hospital", "allocated_by", "request_item")
+            .prefetch_related("resource")
+        )
+        data["allocations"] = AllocationSerializer(allocations, many=True).data
         return data
 
     def get_actions(self, case):
