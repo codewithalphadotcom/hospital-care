@@ -3,7 +3,9 @@
 from rest_framework import serializers
 
 from apps.blood.models import BloodGroup, Component
+from apps.equipment.models import EquipmentType
 from apps.hospitals.models import BedType
+from apps.operating_rooms.models import OrCapability
 
 from .availability import local_availability
 from .models import (
@@ -16,23 +18,37 @@ from .models import (
 )
 
 MAX_ITEMS = 10
-MAX_QUANTITY = {ResourceType.BLOOD: 20, ResourceType.BED: 5}
+MAX_QUANTITY = {
+    ResourceType.BLOOD: 20,
+    ResourceType.BED: 5,
+    ResourceType.EQUIPMENT: 5,
+    ResourceType.OPERATING_ROOM: 3,  # a room is a bigger ask than a bed, so fewer per line
+}
+# The field each type of need must send. Fields of other types are ignored and stored blank.
+REQUIRED_FIELDS = {
+    ResourceType.BLOOD: ["group", "component"],
+    ResourceType.BED: ["bedType"],
+    ResourceType.EQUIPMENT: ["equipmentType"],
+    ResourceType.OPERATING_ROOM: ["capability"],
+}
 MAX_NOTE = 500
 
 
 class RequestItemSerializer(serializers.Serializer):
-    """`{type: "blood", group, component, quantity}` or `{type: "bed", bedType, quantity}`."""
+    """`{type: "blood", group, component, quantity}`, `{type: "bed", bedType, quantity}`,
+    `{type: "equipment", equipmentType, quantity}` or `{type: "operatingRoom", capability, quantity}`."""
 
     type = serializers.ChoiceField(choices=ResourceType.choices)
     group = serializers.ChoiceField(choices=BloodGroup.choices, required=False)
     component = serializers.ChoiceField(choices=Component.choices, required=False)
     bedType = serializers.ChoiceField(choices=BedType.choices, required=False)
+    equipmentType = serializers.ChoiceField(choices=EquipmentType.choices, required=False)
+    capability = serializers.ChoiceField(choices=OrCapability.choices, required=False)
     quantity = serializers.IntegerField(min_value=1)
 
     def validate(self, attrs):
         kind = attrs["type"]
-        needed = ["group", "component"] if kind == ResourceType.BLOOD else ["bedType"]
-        missing = {field: "This field is required." for field in needed if field not in attrs}
+        missing = {field: "This field is required." for field in REQUIRED_FIELDS[kind] if field not in attrs}
         if missing:
             raise serializers.ValidationError(missing)
         if attrs["quantity"] > MAX_QUANTITY[kind]:
@@ -45,8 +61,12 @@ class RequestItemSerializer(serializers.Serializer):
         data = {"type": item.resource_type, "quantity": item.quantity}
         if item.resource_type == ResourceType.BLOOD:
             data.update(group=item.blood_group, component=item.component)
-        else:
+        elif item.resource_type == ResourceType.BED:
             data["bedType"] = item.bed_type
+        elif item.resource_type == ResourceType.EQUIPMENT:
+            data["equipmentType"] = item.equipment_type
+        else:
+            data["capability"] = item.capability
         return data
 
 
@@ -169,3 +189,47 @@ class CaseDetailSerializer(CaseSerializer):
         """The note of the latest close (story #35), or None. Reads the prefetched history: no extra query."""
         closes = [change for change in case.history.all() if change.action == "close"]
         return closes[-1].note if closes else None
+
+
+class CandidateSerializer(serializers.Serializer):
+    """One hospital that can supply a requirement (story #38). `earliestExpiry` and `bestDonorRank` are blood
+    only, so other types don't carry them."""
+
+    def to_representation(self, candidate):
+        data = {
+            "hospital": {"id": candidate.hospital.pk, "name": candidate.hospital.name},
+            "available": candidate.available,
+            "covers": candidate.covers,
+            "distanceKm": None if candidate.distance_km is None else round(candidate.distance_km, 1),
+            "travelMinutes": candidate.travel_minutes,
+        }
+        if candidate.earliest_expiry is not None:
+            data["earliestExpiry"] = serializers.DateTimeField().to_representation(candidate.earliest_expiry)
+        if candidate.best_donor_rank is not None:
+            data["bestDonorRank"] = candidate.best_donor_rank
+        return data
+
+
+def need_label(item: RequestItem) -> str:
+    """A requirement as a short label for the sources list: "O- red cells", "ICU bed", "Ventilator",
+    "Cardiac operating room"."""
+    if item.resource_type == ResourceType.BLOOD:
+        return f"{item.blood_group} {Component(item.component).label.lower()}"
+    if item.resource_type == ResourceType.BED:
+        return f"{BedType(item.bed_type).label} bed"
+    if item.resource_type == ResourceType.EQUIPMENT:
+        return EquipmentType(item.equipment_type).label
+    return f"{OrCapability(item.capability).label} operating room"
+
+
+class CandidateItemSerializer(serializers.Serializer):
+    """One short requirement and the hospitals that can supply it. Shape of `CandidateItem` in
+    api/emergencies.ts."""
+
+    def to_representation(self, found):
+        return {
+            "itemId": found.item.pk,
+            "need": need_label(found.item),
+            "shortfall": found.shortfall,
+            "candidates": [CandidateSerializer(c).data for c in found.candidates],
+        }

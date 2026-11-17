@@ -8,10 +8,12 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import module_permission, own_hospital
 from apps.hospitals.models import DoctorShift
 from apps.hospitals.serializers import DoctorSerializer
+from apps.matching.candidates import candidates_for_case
 from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import EmergencyRequest, EmergencyStatus, RequestItem, RequestStatus, RequestStatusChange
 from .serializers import (
+    CandidateItemSerializer,
     CaseActionSerializer,
     CaseDetailSerializer,
     CaseInputSerializer,
@@ -113,6 +115,25 @@ class EmergencyFeedView(APIView):
             .by_priority()[:FEED_LIMIT]
         )
         return Response(FeedEntrySerializer(cases, many=True).data)
+
+
+class CaseCandidatesView(APIView):
+    """GET /api/emergencies/<reference>/candidates/ → the other hospitals that can supply each short
+    requirement (story #38). Items with no shortfall are left out, so a case that is covered locally gets
+    `items: []`. The same read rule as the detail: another hospital's case is 404. Doesn't escalate, so it
+    stays a plain read."""
+
+    permission_classes = [module_permission("emergencies")]
+
+    def get(self, request, reference):
+        case = get_object_or_404(
+            own_hospital(EmergencyRequest.objects.select_related("hospital"), request.user),
+            reference=reference,
+        )
+        found = candidates_for_case(case)
+        return Response(
+            {"reference": case.reference, "items": CandidateItemSerializer(found, many=True).data}
+        )
 
 
 class CaseActionView(APIView):
