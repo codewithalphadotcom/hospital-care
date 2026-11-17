@@ -26,7 +26,13 @@ import pageStyles from './StaffPages.module.css'
 type TypeFilter = 'all' | EquipmentType
 type StatusFilter = 'all' | EquipmentStatus
 
-const TONE: Record<EquipmentStatus, Tone> = { available: 'ok', inUse: 'neutral', maintenance: 'warning', outOfService: 'critical' }
+const TONE: Record<EquipmentStatus, Tone> = {
+  available: 'ok',
+  reserved: 'neutral',
+  inUse: 'neutral',
+  maintenance: 'warning',
+  outOfService: 'critical',
+}
 const statusLabel = (s: EquipmentStatus) => EQUIPMENT_STATUSES.find((x) => x.value === s)!.label
 const typeLabel = (t: EquipmentType) => EQUIPMENT_TYPES.find((x) => x.value === t)!.label.replace(/s$/, '')
 

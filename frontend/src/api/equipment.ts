@@ -1,7 +1,7 @@
 import { apiGet, apiPost } from './client'
 
 export type EquipmentType = 'ventilator' | 'monitor' | 'defibrillator' | 'dialysis'
-export type EquipmentStatus = 'available' | 'inUse' | 'maintenance' | 'outOfService'
+export type EquipmentStatus = 'available' | 'reserved' | 'inUse' | 'maintenance' | 'outOfService'
 
 export const EQUIPMENT_TYPES: readonly { value: EquipmentType; label: string }[] = [
   { value: 'ventilator', label: 'Ventilators' },
@@ -12,6 +12,7 @@ export const EQUIPMENT_TYPES: readonly { value: EquipmentType; label: string }[]
 
 export const EQUIPMENT_STATUSES: readonly { value: EquipmentStatus; label: string }[] = [
   { value: 'available', label: 'Available' },
+  { value: 'reserved', label: 'Reserved' },
   { value: 'inUse', label: 'In use' },
   { value: 'maintenance', label: 'Maintenance' },
   { value: 'outOfService', label: 'Out of service' },
@@ -41,7 +42,15 @@ export function createEquipment(input: EquipmentInput): Promise<Equipment> {
   return apiPost<Equipment>('/equipment/', input)
 }
 
-export type EquipmentAction = 'use' | 'release' | 'startMaintenance' | 'finishMaintenance' | 'outOfService' | 'returnToService'
+export type EquipmentAction =
+  | 'use'
+  | 'release'
+  | 'reserve'
+  | 'cancelReservation'
+  | 'startMaintenance'
+  | 'finishMaintenance'
+  | 'outOfService'
+  | 'returnToService'
 
 /** Move equipment along its lifecycle. POST /api/equipment/<id>/actions/ (equipment: edit). 409 if the move isn't allowed any more. */
 export function postEquipmentAction(id: number, action: EquipmentAction): Promise<Equipment> {

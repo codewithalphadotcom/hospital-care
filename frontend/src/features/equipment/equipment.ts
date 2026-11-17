@@ -6,8 +6,13 @@ type Transition = { action: EquipmentAction; label: string; next: EquipmentStatu
 const TRANSITIONS: Record<EquipmentStatus, readonly Transition[]> = {
   available: [
     { action: 'use', label: 'Mark in use', next: 'inUse' },
+    { action: 'reserve', label: 'Reserve', next: 'reserved' },
     { action: 'startMaintenance', label: 'Start maintenance', next: 'maintenance' },
     { action: 'outOfService', label: 'Take out of service', next: 'outOfService' },
+  ],
+  reserved: [
+    { action: 'use', label: 'Mark in use', next: 'inUse' },
+    { action: 'cancelReservation', label: 'Cancel reservation', next: 'available' },
   ],
   inUse: [
     { action: 'release', label: 'Release', next: 'available' },
