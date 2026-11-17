@@ -1,0 +1,235 @@
+/* Emergency cases (stories #30, #32). Follows the blood and hospital forms' conventions. */
+
+.form {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 40rem;
+}
+
+.form select {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  border: 2px solid var(--rule);
+  border-radius: var(--radius);
+  font: inherit;
+}
+
+/* ── Step indicator ─────────────────────────────────── */
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+
+.steps li {
+  counter-increment: step;
+}
+
+.steps li::before {
+  content: counter(step) '. ';
+}
+
+.steps li[aria-current='step'] {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.3em;
+}
+
+.steps .done::after {
+  content: ' ✓';
+}
+
+.stepHeading {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.stepHeading:focus {
+  outline: none;
+}
+
+.stepHeading:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Step 1: severity ───────────────────────────────── */
+
+.fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldset legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-weight: 700;
+}
+
+.severities {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.severity {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  padding: var(--space-3);
+  border: 2px solid var(--rule);
+  border-left-width: 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.severity[data-severity='critical'] {
+  border-left-color: var(--status-critical);
+}
+
+.severity[data-severity='urgent'] {
+  border-left-color: var(--status-warning);
+}
+
+.severity:has(input:checked) {
+  border-color: var(--ink);
+}
+
+.severity input {
+  margin-top: 0.3em;
+}
+
+.severity > span {
+  display: grid;
+}
+
+.hint {
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+
+/* ── Step 2: needs ──────────────────────────────────── */
+
+.need {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-4);
+  border: 2px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.need legend {
+  padding: 0 var(--space-2);
+  font-weight: 700;
+}
+
+.needFields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 40rem) {
+  .needFields {
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    align-items: start;
+  }
+}
+
+/* ── Step 3: review ─────────────────────────────────── */
+
+.review {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+}
+
+.review dt {
+  font-weight: 700;
+}
+
+.review dd {
+  margin: 0;
+}
+
+.review ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+/* ── Buttons ────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.actions > button[type='submit'] {
+  width: auto;
+}
+
+.secondaryAction {
+  min-height: var(--tap);
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.secondaryAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.link {
+  justify-self: start;
+  min-height: var(--tap);
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── Case list ──────────────────────────────────────── */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.reference {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}

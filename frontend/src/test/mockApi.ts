@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
+import type { CaseInput, EmergencyCase } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
@@ -9,6 +10,7 @@ import { applyAction } from '../features/beds/beds'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
+import { sampleCases } from './fixtures/emergencies'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
 import { sampleMedicines } from './fixtures/pharmacy'
 import { samplePublicStatus } from './fixtures/publicStatus'
@@ -87,16 +89,19 @@ type StaffApiOptions = {
   board?: BedBoard
   /** Use this public status instead of the sample one. */
   publicStatus?: PublicStatus
-  /** Make every hospitals and users call fail as if the server were down. */
+  /** Make every hospitals, users and emergencies call fail as if the server were down. */
   networkDown?: boolean
+  /** Use these emergency cases instead of the sample ones. */
+  cases?: EmergencyCase[]
 }
 
-export function mockStaffApi({ role, erDown = false, board: customBoard, publicStatus, networkDown = false }: StaffApiOptions) {
+export function mockStaffApi({ role, erDown = false, board: customBoard, publicStatus, networkDown = false, cases: customCases }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
   const units = sampleBloodUnits(now)
   const hospitals = sampleHospitals()
   const users = sampleUsers()
+  const cases = customCases ?? sampleCases(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
   /** Like gate, but the reply sees the request, and `networkDown` fails it. Reads need view, writes need edit. */
@@ -120,6 +125,7 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
 
   const fetchMock = mockApi({
     'GET /auth/me/': role ? ok(userFor(role)) : fail(403),
+    'POST /auth/login/': role ? ok(userFor(role)) : fail(401, { detail: 'That email and password don’t match an account.' }),
     'POST /auth/logout/': { status: 204 },
     'GET /public/status/': erDown ? fail(503) : ok(publicStatus ?? samplePublicStatus(now)),
     'GET /beds/': gate('beds', () => ok(board)),
@@ -173,6 +179,25 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
       }
       return ok(board.beds[index])
     },
+
+    'GET /emergencies/': view('emergencies', () => ok(cases)),
+    'POST /emergencies/': edit('emergencies', ({ body }) => {
+      const input = body as CaseInput
+      if (!input.items?.length) return fail(400, { items: ['This list may not be empty.'] })
+      const year = now.getFullYear()
+      const created: EmergencyCase = {
+        id: `EC-${year}-${String(cases.length + 1).padStart(4, '0')}`,
+        severity: input.severity,
+        status: 'open',
+        patientRef: input.patientRef,
+        hospital: role === 'patient' || !role ? null : userFor(role).hospital,
+        createdBy: role ? NAMES[role] : '',
+        createdAt: new Date().toISOString(),
+        items: input.items,
+      }
+      cases.unshift(created)
+      return { status: 201, body: created }
+    }),
 
     'GET /users/': view('users', () => ok(users)),
     'PATCH /users/:id/': edit('users', ({ params, body }) => {
@@ -230,5 +255,5 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
       return { status: 204 }
     }),
   })
-  return { fetchMock, board, hospitals, users }
+  return { fetchMock, board, hospitals, users, cases }
 }

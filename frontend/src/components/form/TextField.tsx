@@ -7,7 +7,7 @@ type TextFieldProps = FieldProps & {
   onChange: (value: string) => void
   type?: 'text' | 'email' | 'tel' | 'date'
   autoComplete?: string
-  inputMode?: 'decimal' | 'text'
+  inputMode?: 'decimal' | 'numeric' | 'text'
 }
 
 export function TextField({ value, onChange, type = 'text', autoComplete, inputMode, ...field }: TextFieldProps) {

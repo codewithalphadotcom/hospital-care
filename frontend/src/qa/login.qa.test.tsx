@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppRoutes } from '../App'
-import { mockApi, ok, fail, userFor } from '../test/mockApi'
+import { mockApi, mockStaffApi, ok, fail, userFor } from '../test/mockApi'
 import { samplePublicStatus } from '../test/fixtures/publicStatus'
 import LoginPage from '../pages/LoginPage'
 
@@ -205,7 +205,18 @@ describe('Sign-in: positive cases (TC)', () => {
     expect(await screen.findByText('landed on /staff')).toBeInTheDocument()
   })
 
-  it.todo('TC-23 coordinator signs in to emergency request entry (emergency requests are planned for Sprint 5)')
+  it('TC-23 (ADAPTED) a doctor, standing in for the coordinator, signs in to emergency case entry', async () => {
+    // There is no coordinator role yet (#9); doctors open emergency cases (#30).
+    mockStaffApi({ role: 'doctor' })
+    render(
+      <MemoryRouter initialEntries={['/login?next=%2Fstaff%2Femergencies']}>
+        <AppRoutes />
+      </MemoryRouter>,
+    )
+    await signIn('doctor@hospital.test', 'valid-password-1')
+    await userEvent.click(await screen.findByRole('button', { name: 'New case' }))
+    expect(screen.getByRole('heading', { name: 'Step 1 of 3: Case' })).toHaveFocus()
+  })
 
   it('TC-29 after sign-in, staff return to the page they asked for', async () => {
     mockApi({ 'POST /auth/login/': ok(userFor('nurse')) })
