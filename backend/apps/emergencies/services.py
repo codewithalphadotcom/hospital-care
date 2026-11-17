@@ -93,7 +93,7 @@ def create_case(*, severity: str, patient_ref: str, items: list[dict], actor) ->
     return case
 
 
-def _move(case: EmergencyRequest, action: str, *, note: str, actor, at=None) -> EmergencyRequest:
+def move_case(case: EmergencyRequest, action: str, *, note: str, actor, at=None) -> EmergencyRequest:
     """
     The one place a status changes: the move, its timeline entry and its audit record. Raises
     TransitionNotAllowed and saves nothing if the lifecycle refuses the move. The caller holds the row lock
@@ -132,7 +132,7 @@ def apply_case_action(reference: str, action: str, *, note: str, actor) -> Emerg
     REQUEST_LIFECYCLE.next(case.status, action)
     if action == "close" and not note.strip():
         raise OutcomeNoteRequired()
-    return _move(case, action, note=note, actor=actor)
+    return move_case(case, action, note=note, actor=actor)
 
 
 def _overdue_ids(cutoff):
@@ -170,7 +170,7 @@ def escalate_overdue(now=None) -> int:
             # Re-check under the lock: a case resumed since the query has a fresh window and stays.
             if case.history.aggregate(last=Max("at"))["last"] >= cutoff:
                 continue
-            _move(
+            move_case(
                 case,
                 "escalate",
                 note=f"Not fulfilled within {minutes} minutes (automatic)",

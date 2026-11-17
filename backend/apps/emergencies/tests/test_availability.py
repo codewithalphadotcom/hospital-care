@@ -274,8 +274,13 @@ def test_the_detail_exposes_local_figures_per_need_and_the_list_does_not(client_
         "quantity": 3,
         "localAvailable": 1,
         "shortfall": 2,
+        "reserved": 0,
+        "itemId": RequestItem.objects.order_by("id").first().pk,
     }
     assert [(i["localAvailable"], i["shortfall"]) for i in detail["items"]] == [(1, 2), (1, 0)]
+    assert [i["itemId"] for i in detail["items"]] == list(
+        RequestItem.objects.order_by("id").values_list("pk", flat=True)
+    )
     assert detail["shortfallTotal"] == 2
 
     listed = doctor.get(reverse("emergency-cases")).json()[0]
@@ -309,9 +314,11 @@ def test_the_detail_query_count_is_bounded_and_does_not_grow_with_the_needs(
 
     small = count_queries(doctor, reverse("emergency-case", args=["EC-2026-0001"]))
     url = reverse("emergency-case", args=["EC-2026-0002"])
-    # The overdue check (one query, story #35), the case, its needs, its history, and one query per resource
-    # type (blood, beds, equipment, operating rooms), whatever the needs.
-    with django_assert_max_num_queries(8):
+    # The overdue check (one query, story #35), the expiry check for holds (one query, story #43), the case,
+    # its needs, its history, the needs again with their holds for availability (one query, story #43), the
+    # holds on the case (one query), and one query per resource type (blood, beds, equipment, operating
+    # rooms), whatever the needs.
+    with django_assert_max_num_queries(11):
         big = count_queries(doctor, url)
 
     assert big == small

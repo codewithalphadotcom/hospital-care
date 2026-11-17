@@ -7,12 +7,13 @@ Blood counts exact group and component matches only: cross-group compatibility (
 
 from dataclasses import dataclass
 
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from apps.blood.models import BloodUnit
 from apps.blood.services import usable_units
 from apps.equipment.models import Equipment
 from apps.hospitals.models import Bed, BedStatus
+from apps.matching.models import ACTIVE, ReservationStatus
 from apps.operating_rooms.models import OperatingRoom
 
 from .models import EmergencyRequest, RequestItem, ResourceType
@@ -21,8 +22,11 @@ from .models import EmergencyRequest, RequestItem, ResourceType
 @dataclass(frozen=True)
 class ItemAvailability:
     item: RequestItem
-    available: int  # what the case's hospital has that matches this requirement exactly
-    shortfall: int  # still needed from other hospitals: max(0, quantity - fulfilled - available)
+    available: int  # what the case's hospital has that matches this requirement exactly, free of holds
+    shortfall: (
+        int  # still needed from other hospitals: what is left of the need after its holds, less available
+    )
+    held: int = 0  # the need's resources held for this case (story #43), not yet allocated
 
 
 @dataclass
@@ -35,22 +39,30 @@ class _Stock:
 
 
 def local_availability(case: EmergencyRequest) -> list[ItemAvailability]:
-    """One row per need, in the order of `case.items`. One grouped query per resource type, however many.
-    A case with no hospital has 0 available for everything and runs no query.
+    """One row per need, in the order of `case.items`. One grouped query per resource type, however many. A
+    case with no hospital has 0 available for everything.
+
+    A need's holds (story #43) come off its quantity before its shortfall is worked out: units held for
+    this case are already its, so they aren't asked for from other hospitals. Held stock is not free, so it
+    is not in `available` either. The holds are counted in the same query as the items.
 
     Needs that draw on the same stock (two O- blood lines, two ICU lines) share it in list order: the first
-    sees the whole stock and the next sees what is left. Otherwise two lines could both claim the same units
-    and the shortfall would be undercounted. An operating room is claimed by id, so a room that has two
-    capabilities covers one line, not both.
-    """
-    items = list(case.items.all())
+    sees the whole stock and the next sees what is left. Otherwise two lines could both claim the same
+    units and the shortfall would be undercounted. An operating room is claimed by id, so a room that has
+    two capabilities covers one line, not both."""
+    items = list(
+        case.items.annotate(
+            active=Count("reservations", filter=Q(reservations__status__in=ACTIVE)),
+            held=Count("reservations", filter=Q(reservations__status=ReservationStatus.HELD)),
+        ).order_by("id")
+    )
     if not items:
         return []
     stock = _local_stock(case.hospital_id) if case.hospital_id else _Stock({}, [])
     counts, rooms = stock.counts, stock.rooms
     rows = []
     for item in items:
-        need = max(0, item.quantity - item.fulfilled)
+        need = max(0, item.quantity - item.fulfilled - item.active)
         if item.resource_type == ResourceType.OPERATING_ROOM:
             matching = [room for room in rooms if item.capability in room[1]]
             available = len(matching)
@@ -60,8 +72,8 @@ def local_availability(case: EmergencyRequest) -> list[ItemAvailability]:
             key = _stock_key(item)
             available = counts.get(key, 0)
             counts[key] = available - min(available, need)
-        shortfall = max(0, item.quantity - item.fulfilled - available)
-        rows.append(ItemAvailability(item=item, available=available, shortfall=shortfall))
+        shortfall = max(0, need - available)
+        rows.append(ItemAvailability(item=item, available=available, shortfall=shortfall, held=item.held))
     return rows
 
 
