@@ -14,12 +14,16 @@ from apps.hospitals.models import Hospital
 from apps.matching.candidates import Candidate, ItemCandidates
 from apps.matching.scoring import (
     DEFAULT_STRATEGY,
+    DETAILS,
     STRATEGIES,
     EarliestExpiryFirst,
     MostStockFirst,
     NearestFirst,
+    compatibility_detail,
     compatibility_factor,
+    distance_detail,
     distance_factor,
+    expiry_detail,
     expiry_factor,
     parse_scoring_config,
     quantity_factor,
@@ -132,8 +136,56 @@ def test_points_add_up_to_the_total(strategy, item, cand):
     assert [f.name for f in score.factors] == list(strategy.default_weights)
     assert score.total == pytest.approx(sum(f.points for f in score.factors), abs=0.05)
     assert 0 <= score.total <= 100
+    assert score.strategy == strategy.name
     for factor in score.factors:
-        assert factor.points == pytest.approx(factor.value * factor.weight * 100 / total_weight)
+        assert factor.points == pytest.approx(factor.value * factor.weight * 100 / total_weight, abs=0.05)
+        assert round(factor.points, 1) == factor.points  # one decimal, so the sum shows exactly
+
+
+def test_the_points_sum_to_the_total_exactly_when_shown_to_one_decimal():
+    cand = candidate(available=2, distance_km=20, expires_in=10, donor_rank=2)
+    score = EarliestExpiryFirst().score(cand, needed=3, item=blood_item(), now=NOW)
+    assert round(sum(f.points for f in score.factors), 1) == score.total
+
+
+# Details: the short reason shown next to each factor's points.
+
+
+def test_each_factor_detail_says_the_reason_in_plain_words():
+    item = blood_item()
+    cand = Candidate(
+        hospital=Hospital(pk=1),
+        available=4,
+        covers=True,
+        distance_km=4.24,
+        travel_minutes=6,
+        earliest_expiry=NOW + timedelta(days=3, hours=5),
+        best_donor_rank=0,
+    )
+    details = {
+        name: DETAILS[name](cand, needed=3, item=item, now=NOW)
+        for name in ("distance", "expiry", "quantity", "compatibility")
+    }
+    assert details == {
+        "distance": "4.2 km, about 6 min",
+        "expiry": "expires in 3 days",
+        "quantity": "4 available, 3 needed",
+        "compatibility": "identical group",
+    }
+
+
+def test_details_for_the_missing_and_the_unusual_cases():
+    item = blood_item()
+    unknown = candidate(distance_km=None, expires_in=None, donor_rank=None)
+    assert distance_detail(unknown, needed=3, item=item, now=NOW) == "distance unknown"
+    assert expiry_detail(unknown, needed=3, item=item, now=NOW) == "no expiry date"
+    assert compatibility_detail(unknown, needed=3, item=item, now=NOW) == "no compatible units"
+
+    substitute = candidate(donor_rank=2)
+    assert compatibility_detail(substitute, needed=3, item=item, now=NOW) == "compatible substitute, rank 2"
+    assert expiry_detail(candidate(expires_in=1), needed=3, item=item, now=NOW) == "expires in 1 day"
+    assert expiry_detail(candidate(expires_in=0.5), needed=3, item=item, now=NOW) == "expires within a day"
+    assert expiry_detail(candidate(expires_in=-1), needed=3, item=item, now=NOW) == "already expired"
 
 
 # Defaults and configuration.
@@ -207,6 +259,15 @@ def test_ties_are_ordered_by_hospital_id_whatever_the_input_order():
         for permutation in itertools.permutations(trio)
     }
     assert orders == {(1, 2, 3)}
+
+
+def test_rank_numbers_the_candidates_from_one_in_order():
+    near = candidate(pk=1, distance_km=2)
+    far = candidate(pk=2, distance_km=30)
+
+    result = ranked(bed_item(), 3, far, near)
+
+    assert [(s.rank, s.candidate.hospital.pk) for s in result] == [(1, 1), (2, 2)]
 
 
 # Validation: each case refuses the setting with ImproperlyConfigured.

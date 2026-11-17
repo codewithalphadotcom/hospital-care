@@ -4,9 +4,8 @@ they are.
 One registry maps each requirement type to the matchable resources that satisfy it, as a queryset of a
 `Resource`
 subclass. One generic query then groups them by hospital, because every subclass shares `Resource`'s hospital
-foreign key. Scoring (#40) and ranking (#41) come later; the order here is plain: covering first, then
-nearest,
-then id.
+foreign key. This module gives the plain order: covering first, then nearest, then id. The API ranks and
+scores the candidates with `scoring.rank` (#40, shown in #41).
 """
 
 from collections.abc import Callable

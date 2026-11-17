@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -71,25 +71,76 @@ FACTORS: dict[str, Callable[..., float]] = {
     "compatibility": compatibility_factor,
 }
 
+FACTOR_LABELS: dict[str, str] = {
+    "distance": "Distance",
+    "expiry": "Expiry",
+    "quantity": "Stock",
+    "compatibility": "Blood group match",
+}
+
+
+# Each detail is the short reason a factor shows on screen, next to its points.
+
+
+def distance_detail(candidate: Candidate, *, needed: int, item: RequestItem, now: datetime) -> str:
+    if candidate.distance_km is None:
+        return "distance unknown"
+    return f"{candidate.distance_km:.1f} km, about {candidate.travel_minutes} min"
+
+
+def expiry_detail(candidate: Candidate, *, needed: int, item: RequestItem, now: datetime) -> str:
+    if candidate.earliest_expiry is None:
+        return "no expiry date"
+    days = (candidate.earliest_expiry - now).total_seconds() / 86400
+    if days < 0:
+        return "already expired"
+    if days < 1:
+        return "expires within a day"
+    whole = round(days)  # nearest day: a unit due in 9 days reads 9 even a few milliseconds later
+    return f"expires in {whole} day" + ("" if whole == 1 else "s")
+
+
+def quantity_detail(candidate: Candidate, *, needed: int, item: RequestItem, now: datetime) -> str:
+    return f"{candidate.available} available, {needed} needed"
+
+
+def compatibility_detail(candidate: Candidate, *, needed: int, item: RequestItem, now: datetime) -> str:
+    if candidate.best_donor_rank is None:
+        return "no compatible units"
+    if candidate.best_donor_rank == 0:
+        return "identical group"
+    return f"compatible substitute, rank {candidate.best_donor_rank}"
+
+
+DETAILS: dict[str, Callable[..., str]] = {
+    "distance": distance_detail,
+    "expiry": expiry_detail,
+    "quantity": quantity_detail,
+    "compatibility": compatibility_detail,
+}
+
 
 @dataclass(frozen=True)
 class FactorScore:
     name: str
     value: float  # 0 to 1
     weight: float
-    points: float  # value x weight, as a share of the total weight, on 0 to 100
+    points: float  # value x weight, as a share of the total weight, on 0 to 100, to one decimal
+    detail: str = ""
 
 
 @dataclass(frozen=True)
 class Score:
-    total: float  # 0 to 100, to one decimal
+    total: float  # 0 to 100, to one decimal: the sum of the factors' points
     factors: tuple[FactorScore, ...]
+    strategy: str = ""  # the strategy's name
 
 
 @dataclass(frozen=True)
 class ScoredCandidate:
     candidate: Candidate
     score: Score
+    rank: int = 0  # 1-based position in the ranking; 0 until rank() sets it
 
 
 def resolve_weights(strategy: type[ScoringStrategy], given: Mapping, *, where: str) -> dict[str, float]:
@@ -118,6 +169,7 @@ def resolve_weights(strategy: type[ScoringStrategy], given: Mapping, *, where: s
 
 class ScoringStrategy:
     name: str = ""
+    label: str = ""  # for people: how the list is ordered
     default_weights: Mapping[str, float] = {}
 
     def __init__(self, weights: Mapping[str, float] | None = None):
@@ -136,22 +188,29 @@ class ScoringStrategy:
         for name in self.factors:
             value = FACTORS[name](candidate, needed=needed, item=item, now=now)
             weight = self.weights[name]
-            factors.append(FactorScore(name, value, weight, value * weight * 100 / total_weight))
-        return Score(total=round(sum(f.points for f in factors), 1), factors=tuple(factors))
+            # Rounded before they are added, so the points a reader sees add up to the total.
+            points = round(value * weight * 100 / total_weight, 1)
+            detail = DETAILS[name](candidate, needed=needed, item=item, now=now)
+            factors.append(FactorScore(name, value, weight, points, detail))
+        total = round(sum(f.points for f in factors), 1)
+        return Score(total=total, factors=tuple(factors), strategy=self.name)
 
 
 class EarliestExpiryFirst(ScoringStrategy):
     name = "earliestExpiry"
+    label = "Earliest expiry first"
     default_weights = {"expiry": 0.5, "compatibility": 0.2, "distance": 0.2, "quantity": 0.1}
 
 
 class NearestFirst(ScoringStrategy):
     name = "nearest"
+    label = "Nearest first"
     default_weights = {"distance": 0.7, "quantity": 0.3}
 
 
 class MostStockFirst(ScoringStrategy):
     name = "mostStock"
+    label = "Most stock first"
     default_weights = {"quantity": 0.7, "distance": 0.3}
 
 
@@ -231,4 +290,4 @@ def rank(item_candidates: ItemCandidates, *, now: datetime | None = None) -> lis
             s.candidate.hospital.pk,
         )
     )
-    return scored
+    return [replace(s, rank=position) for position, s in enumerate(scored, 1)]
