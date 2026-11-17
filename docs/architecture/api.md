@@ -108,14 +108,15 @@ All four `BLOOD_*` settings can be changed with environment variables of the sam
 
 ## Emergency cases (#30, #32)
 
-Module `emergencies`: admin, doctor and nurse can open cases; blood bank and pharmacist can view them. Users
-at a hospital see only its cases (another hospital's case → **404**); staff with no hospital see every case.
+Module `emergencies`: admin, doctor and nurse can open cases and move them; blood bank and pharmacist can view them.
+Users at a hospital see only its cases (another hospital's case → **404**); staff with no hospital see every case.
 
 | Method | Path | Body | Success | Story |
 |---|---|---|---|---|
 | GET | `/emergencies/` | – | `EmergencyCase[]`, most severe first, then oldest first | #30, #31 |
 | POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
-| GET | `/emergencies/<id>/` | – | `EmergencyCase` | #30 |
+| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history` and `actions` | #30, #34 |
+| POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
 
 ```ts
 EmergencyCase = {
@@ -133,8 +134,8 @@ RequestItem = { type: 'blood', group: BloodGroup, component: Component, quantity
 
 **Rules**
 
-- A new case is always `open`, at the creator's hospital, and audit-logged (`emergencyrequest.created`).
-  Moving between statuses arrives with #34.
+- A new case is always `open`, at the creator's hospital, and audit-logged (`emergencyrequest.created`). Its first
+  timeline entry is the creation. Later moves are in [Status and its timeline](#status-and-its-timeline-34).
 - **Severity (#31):** `critical`, `high`, `moderate`, `low`. The list is sorted by severity, then by age with the oldest
   case first within a level (the case waiting longest is handled first). The server does the sort; clients render
   the order they receive. Ties (same severity and time) fall back to id. Cases from before #31 were renamed:
@@ -142,6 +143,59 @@ RequestItem = { type: 'blood', group: BloodGroup, component: Component, quantity
 - No patient-identifying data is collected: `patientRef` is optional.
 - Errors on one need come back keyed by its position: `{"items": {"0": {"quantity": ["..."]}}}`. An empty or
   over-long list is `{"items": ["..."]}`.
+
+### Status and its timeline (#34)
+
+```ts
+EmergencyCaseDetail = EmergencyCase & {
+  history: StatusChange[],      // oldest first; the first entry is the creation
+  actions: CaseAction[]         // the moves valid from the current status, in table order
+}
+StatusChange = {
+  fromStatus: CaseStatus | '',  // '' for the creation entry
+  toStatus: CaseStatus,
+  action: CaseAction | 'create',
+  note: string,                 // up to 500 characters, may be ''
+  actor: string | null,         // the user's name, or email if they have no name; null once they are removed
+  at: string                    // ISO time
+}
+CaseAction = 'startMatching' | 'partiallyFulfil' | 'fulfil' | 'escalate' | 'resumeMatching' | 'close' | 'cancel'
+```
+
+`POST /emergencies/<id>/actions/` takes `{"action": "startMatching", "note": "Blood bank called back"}`. `note` is
+optional. Responses:
+
+| Status | When |
+|---|---|
+| 200 | The move is made. The body is the case as it now is: its new `history` entry and its `actions`. |
+| 400 | `action` is not a move in the lifecycle, or `note` is over 500 characters. Nothing changes. |
+| 403 | The role can view emergencies but not change them (blood bank, pharmacist), or the user is not staff. |
+| 404 | No such case, or another hospital's case (admins: any hospital). Nothing changes. |
+| 409 | The lifecycle does not allow the move from the current status: `{"detail": "Can't close a case that is open."}`. Nothing changes and no timeline entry is written. |
+
+**Transitions** (`REQUEST_LIFECYCLE` in `backend/apps/emergencies/models.py`):
+
+| From | Action | To |
+|---|---|---|
+| open | startMatching | matching |
+| matching | partiallyFulfil | partiallyFulfilled |
+| matching | fulfil | fulfilled |
+| partiallyFulfilled | fulfil | fulfilled |
+| open, matching, partiallyFulfilled | escalate | escalated |
+| escalated | resumeMatching | matching |
+| fulfilled, partiallyFulfilled, escalated | close | closed |
+| open, matching | cancel | cancelled |
+
+`closed` and `cancelled` are terminal: no move leaves them. Until allocation sets fulfilment (#45), staff make every
+move by hand.
+
+Each move writes one timeline entry and one audit record (`emergencyrequest.status_changed`, with the before and after
+status). The audit reason is the note, or the action when there is no note; the audit log keeps 300 characters of it.
+The status change, the entry and the audit record are written in one transaction.
+
+Reads follow the hospital rule above. So an admin who works at one hospital can move another hospital's case, as the
+rule for moves says, but cannot open its page. That is an open question in the
+[#34 inception spec](../aidlc/inception/2026-11-17-emergency-status-tracking.md).
 
 ## Demo data
 

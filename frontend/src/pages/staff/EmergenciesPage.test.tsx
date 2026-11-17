@@ -43,6 +43,17 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     expect(within(row).getByText('Open')).toBeInTheDocument()
   })
 
+  it('links each case reference to its page (story #34)', async () => {
+    mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/emergencies')
+    const link = within(await table()).getByRole('link', { name: 'EC-2026-0002' })
+    expect(link).toHaveAttribute('href', '/staff/emergencies/EC-2026-0002')
+
+    await userEvent.click(link)
+    expect(await screen.findByRole('heading', { name: 'EC-2026-0002' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Status history' })).toBeInTheDocument()
+  })
+
   it('shows cases in the order the server sends them, without re-sorting (#31)', async () => {
     // Deliberately not severity order: the page shows what it is given.
     mockStaffApi({ role: 'nurse', cases: [caseFor('EC-2026-0004', 'low'), caseFor('EC-2026-0001', 'critical'), caseFor('EC-2026-0003', 'moderate')] })

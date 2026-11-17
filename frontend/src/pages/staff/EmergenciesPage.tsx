@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { getCases, SEVERITIES, STATUS_LABEL, type EmergencyCase, type Severity } from '../../api/emergencies'
-import type { Tone } from '../../components/ui/StatusBadge'
+import { Link } from 'react-router-dom'
+import { getCases, SEVERITIES, type EmergencyCase } from '../../api/emergencies'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { describeNeed } from '../../features/emergencies/emergencies'
+import { describeNeed, SEVERITY_TONE, STATUS_LABEL } from '../../features/emergencies/emergencies'
 import styles from '../../features/emergencies/Emergencies.module.css'
 import { NewCaseForm } from '../../features/emergencies/NewCaseForm'
 import { canEdit } from '../../features/staff/roles'
@@ -12,8 +12,6 @@ import { formatClock, formatShortDate } from '../../lib/time'
 import { useLoad } from '../../lib/useLoad'
 import { StaffDataState } from './StaffDataState'
 import pageStyles from './StaffPages.module.css'
-
-const SEVERITY_TONE: Record<Severity, Tone> = { critical: 'critical', high: 'warning', moderate: 'neutral', low: 'neutral' }
 
 /** Emergency cases at the user's hospital, and opening a new one (stories #30, #32). The server orders the list (#31). */
 export default function EmergenciesPage() {
@@ -102,7 +100,9 @@ function CaseRow({ item }: { item: EmergencyCase }) {
   return (
     <tr className={item.severity === 'critical' ? styles.critical : undefined}>
       <td>
-        <span className={styles.reference}>{item.id}</span>
+        <Link to={`/staff/emergencies/${encodeURIComponent(item.id)}`} className={styles.reference}>
+          {item.id}
+        </Link>
         {item.patientRef && <div className={styles.hint}>{item.patientRef}</div>}
       </td>
       <td>

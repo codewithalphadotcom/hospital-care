@@ -30,6 +30,27 @@ export interface CaseInput {
   items: Need[]
 }
 
+/** A move along the lifecycle (story #34). The names match REQUEST_LIFECYCLE in backend/apps/emergencies/models.py. */
+export type CaseAction = 'startMatching' | 'partiallyFulfil' | 'fulfil' | 'escalate' | 'resumeMatching' | 'close' | 'cancel'
+
+/** One entry in a case's timeline, oldest first. Shape of `StatusChangeSerializer`. */
+export interface StatusChange {
+  /** Empty for the first entry, when the case was opened. */
+  fromStatus: CaseStatus | ''
+  toStatus: CaseStatus
+  action: CaseAction | 'create'
+  note: string
+  /** The user's name, or their email if they have no name. Null once the user has been removed. */
+  actor: string | null
+  at: string
+}
+
+/** A case with its timeline and the moves valid from its current status. Shape of `CaseDetailSerializer`. */
+export interface EmergencyCaseDetail extends EmergencyCase {
+  history: StatusChange[]
+  actions: CaseAction[]
+}
+
 export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[] = [
   { id: 'critical', label: 'Critical', hint: 'Life-threatening: needed within the hour' },
   { id: 'high', label: 'High', hint: 'Serious: needed within a few hours' },
@@ -37,20 +58,11 @@ export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[
   { id: 'low', label: 'Low', hint: 'Can wait; handled after the rest' },
 ]
 
-export const STATUS_LABEL: Record<CaseStatus, string> = {
-  open: 'Open',
-  matching: 'Matching',
-  partiallyFulfilled: 'Partially fulfilled',
-  fulfilled: 'Fulfilled',
-  escalated: 'Escalated',
-  closed: 'Closed',
-  cancelled: 'Cancelled',
-}
-
 /** Same limits as the API. */
 export const MAX_NEEDS = 10
 export const MAX_QUANTITY: Record<Need['type'], number> = { blood: 20, bed: 5 }
 export const MAX_PATIENT_REF = 30
+export const MAX_NOTE = 500
 
 /** Cases at the user's hospital, most severe first, then oldest first. GET /api/emergencies/ (emergencies: view). */
 export function getCases(): Promise<EmergencyCase[]> {
@@ -60,4 +72,14 @@ export function getCases(): Promise<EmergencyCase[]> {
 /** Open a case. POST /api/emergencies/ (emergencies: edit). */
 export function createCase(input: CaseInput): Promise<EmergencyCase> {
   return apiPost<EmergencyCase>('/emergencies/', input)
+}
+
+/** One case with its timeline. GET /api/emergencies/<reference>/ (emergencies: view). Another hospital's is 404. */
+export function getCase(reference: string): Promise<EmergencyCaseDetail> {
+  return apiGet<EmergencyCaseDetail>(`/emergencies/${encodeURIComponent(reference)}/`)
+}
+
+/** Move a case. POST /api/emergencies/<reference>/actions/ (emergencies: edit). 409 if the move isn't allowed now. */
+export function postCaseAction(reference: string, action: CaseAction, note: string): Promise<EmergencyCaseDetail> {
+  return apiPost<EmergencyCaseDetail>(`/emergencies/${encodeURIComponent(reference)}/actions/`, { action, note })
 }

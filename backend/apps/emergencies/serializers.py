@@ -5,10 +5,18 @@ from rest_framework import serializers
 from apps.blood.models import BloodGroup, Component
 from apps.hospitals.models import BedType
 
-from .models import EmergencyRequest, RequestItem, ResourceType, Severity
+from .models import (
+    REQUEST_LIFECYCLE,
+    EmergencyRequest,
+    RequestItem,
+    RequestStatusChange,
+    ResourceType,
+    Severity,
+)
 
 MAX_ITEMS = 10
 MAX_QUANTITY = {ResourceType.BLOOD: 20, ResourceType.BED: 5}
+MAX_NOTE = 500
 
 
 class RequestItemSerializer(serializers.Serializer):
@@ -74,3 +82,40 @@ class CaseSerializer(serializers.ModelSerializer):
     def get_createdBy(self, case):
         user = case.created_by
         return (user.get_full_name() or user.email) if user else ""
+
+
+class CaseActionSerializer(serializers.Serializer):
+    """POST /api/emergencies/<reference>/actions/: one move along the lifecycle, with an optional note."""
+
+    action = serializers.ChoiceField(choices=REQUEST_LIFECYCLE.actions)
+    note = serializers.CharField(max_length=MAX_NOTE, required=False, allow_blank=True, default="")
+
+
+class StatusChangeSerializer(serializers.ModelSerializer):
+    """One timeline entry. Shape of `StatusChange` in frontend/src/api/emergencies.ts."""
+
+    fromStatus = serializers.CharField(source="from_status")
+    toStatus = serializers.CharField(source="to_status")
+    actor = serializers.SerializerMethodField()
+    at = serializers.DateTimeField()
+
+    class Meta:
+        model = RequestStatusChange
+        fields = ["fromStatus", "toStatus", "action", "note", "actor", "at"]
+
+    def get_actor(self, change):
+        user = change.actor
+        return (user.get_full_name() or user.email) if user else None
+
+
+class CaseDetailSerializer(CaseSerializer):
+    """One case with its timeline (oldest first) and the actions valid from its current status (story #34)."""
+
+    history = StatusChangeSerializer(many=True, read_only=True)
+    actions = serializers.SerializerMethodField()
+
+    class Meta(CaseSerializer.Meta):
+        fields = [*CaseSerializer.Meta.fields, "history", "actions"]
+
+    def get_actions(self, case):
+        return [action for status, action in REQUEST_LIFECYCLE.transitions if status == case.status]

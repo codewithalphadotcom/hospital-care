@@ -15,10 +15,10 @@ class RequestItemInline(admin.TabularInline):
 
 @admin.register(EmergencyRequest)
 class EmergencyRequestAdmin(admin.ModelAdmin):
-    """Read-mostly: cases are opened in the app so they're audit-logged."""
+    """Read-mostly: cases are opened and moved in the app so they're audit-logged and in the timeline."""
 
     list_display = ["reference", "severity", "status", "hospital", "created_at"]
     list_filter = ["severity", "status", "hospital"]
     search_fields = ["reference"]
-    readonly_fields = ["reference", "created_by", "created_at"]
+    readonly_fields = ["reference", "status", "created_by", "created_at"]
     inlines = [RequestItemInline]

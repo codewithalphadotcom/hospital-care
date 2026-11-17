@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '../../api/client'
 import {
+  actionsFor,
+  describeMove,
   describeNeed,
   emptyCase,
   newNeed,
+  nextStatus,
   serverErrors,
   stepWithErrors,
   toCaseInput,
@@ -72,5 +75,26 @@ describe('emergency case form rules (#30, #32)', () => {
     expect(stepWithErrors(onCase)).toBe(0)
     expect(serverErrors(new ApiError(400, { items: ['This list may not be empty.'] }), needs).needs).toBe('This list may not be empty.')
     expect(stepWithErrors(serverErrors(new ApiError(500), needs))).toBeNull()
+  })
+})
+
+describe('case lifecycle mirror (#34)', () => {
+  it('offers the moves each status allows, and none once a case is closed or cancelled', () => {
+    expect(actionsFor('open')).toEqual(['startMatching', 'escalate', 'cancel'])
+    expect(actionsFor('escalated')).toEqual(['resumeMatching', 'close'])
+    expect(actionsFor('closed')).toEqual([])
+    expect(actionsFor('cancelled')).toEqual([])
+  })
+
+  it('refuses the moves the lifecycle does not allow', () => {
+    expect(nextStatus('open', 'close')).toBeUndefined()
+    expect(nextStatus('matching', 'fulfil')).toBe('fulfilled')
+    expect(nextStatus('cancelled', 'startMatching')).toBeUndefined()
+  })
+
+  it('describes the opening entry as the case being opened', () => {
+    const opening = { fromStatus: '', toStatus: 'open', action: 'create', note: '', actor: null, at: '' } as const
+    expect(describeMove(opening)).toBe('Case opened')
+    expect(describeMove({ ...opening, fromStatus: 'matching', toStatus: 'fulfilled', action: 'fulfil' })).toBe('Matching → Fulfilled')
   })
 })

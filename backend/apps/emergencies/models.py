@@ -1,6 +1,9 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Case, Value, When
+from django.utils import timezone
+
+from apps.resources.state_machine import StateMachine
 
 
 class ErStatus(models.TextChoices):
@@ -42,7 +45,7 @@ class Severity(models.TextChoices):
 
 
 class RequestStatus(models.TextChoices):
-    """The full lifecycle from the ERD. A new case is `open`; the moves between statuses arrive with #34."""
+    """The lifecycle from the ERD. A new case is `open`; the moves are in REQUEST_LIFECYCLE."""
 
     OPEN = "open", "Open"
     MATCHING = "matching", "Matching"
@@ -51,6 +54,30 @@ class RequestStatus(models.TextChoices):
     ESCALATED = "escalated", "Escalated"
     CLOSED = "closed", "Closed"
     CANCELLED = "cancelled", "Cancelled"
+
+
+S = RequestStatus
+
+# Story #34. Staff move cases by hand until allocation (#45) sets fulfilment. Closed and cancelled are final.
+REQUEST_LIFECYCLE = StateMachine(
+    "case",
+    RequestStatus,
+    {
+        (S.OPEN, "startMatching"): S.MATCHING,
+        (S.MATCHING, "partiallyFulfil"): S.PARTIALLY_FULFILLED,
+        (S.MATCHING, "fulfil"): S.FULFILLED,
+        (S.PARTIALLY_FULFILLED, "fulfil"): S.FULFILLED,
+        (S.OPEN, "escalate"): S.ESCALATED,
+        (S.MATCHING, "escalate"): S.ESCALATED,
+        (S.PARTIALLY_FULFILLED, "escalate"): S.ESCALATED,
+        (S.ESCALATED, "resumeMatching"): S.MATCHING,
+        (S.FULFILLED, "close"): S.CLOSED,
+        (S.PARTIALLY_FULFILLED, "close"): S.CLOSED,
+        (S.ESCALATED, "close"): S.CLOSED,
+        (S.OPEN, "cancel"): S.CANCELLED,
+        (S.MATCHING, "cancel"): S.CANCELLED,
+    },
+)
 
 
 class EmergencyRequestQuerySet(models.QuerySet):
@@ -88,6 +115,27 @@ class EmergencyRequest(models.Model):
 
     def __str__(self):
         return self.reference
+
+
+class RequestStatusChange(models.Model):
+    """One entry in a case's timeline (story #34). The first is the creation: "" to open, action "create"."""
+
+    request = models.ForeignKey(EmergencyRequest, on_delete=models.CASCADE, related_name="history")
+    from_status = models.CharField(max_length=20, blank=True)
+    to_status = models.CharField(max_length=20, choices=RequestStatus.choices)
+    action = models.CharField(max_length=20)
+    note = models.TextField(blank=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["at", "id"]
+        verbose_name_plural = "request status changes"
+
+    def __str__(self):
+        return f"{self.request_id}: {self.from_status or '-'} → {self.to_status}"
 
 
 class ResourceType(models.TextChoices):

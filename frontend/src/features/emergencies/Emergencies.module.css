@@ -242,3 +242,58 @@
 .critical > td:first-child {
   box-shadow: inset var(--stripe) 0 0 var(--status-critical);
 }
+
+/* ── Case page (story #34) ──────────────────────────── */
+
+.back {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  font-weight: 700;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+}
+
+.facts dt {
+  font-weight: 700;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.needs {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.timeline {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline li {
+  display: grid;
+  gap: var(--space-1);
+  padding-left: var(--space-4);
+  border-left: 3px solid var(--rule);
+}
+
+.entryNote {
+  margin: 0;
+}

@@ -1,12 +1,13 @@
 import { vi } from 'vitest'
 import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
-import type { CaseInput, EmergencyCase, Severity } from '../api/emergencies'
+import type { CaseAction, CaseInput, EmergencyCase, EmergencyCaseDetail, Severity, StatusChange } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
 import type { UserSummary } from '../api/users'
 import { applyAction } from '../features/beds/beds'
+import { actionsFor, nextStatus, STATUS_LABEL } from '../features/emergencies/emergencies'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
@@ -108,7 +109,19 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
   const hospitals = sampleHospitals()
   const users = sampleUsers()
   const cases = customCases ?? sampleCases(now)
-  const gate = (module: Module, reply: () => Reply): Route => () =>
+  /** Each case's timeline, as the server keeps it. A case that starts here has only its opening entry. */
+  const openingEntry = (c: EmergencyCase): StatusChange => ({
+    fromStatus: '',
+    toStatus: 'open',
+    action: 'create',
+    note: '',
+    actor: c.createdBy || null,
+    at: c.createdAt,
+  })
+  const histories = new Map<string, StatusChange[]>(cases.map((c) => [c.id, [openingEntry(c)]]))
+  const findCase = (reference: string) => cases.find((c) => c.id === reference)
+  const detailOf = (c: EmergencyCase): EmergencyCaseDetail => ({ ...c, history: histories.get(c.id) ?? [], actions: actionsFor(c.status) })
+  const gate =(module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
   /** Like gate, but the reply sees the request, and `networkDown` fails it. Reads need view, writes need edit. */
   const allowed =
@@ -202,8 +215,31 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
         items: input.items,
       }
       cases.push(created)
+      histories.set(created.id, [openingEntry(created)])
       cases.sort(byPriority)
       return { status: 201, body: created }
+    }),
+    'GET /emergencies/:reference/': view('emergencies', ({ params }) => {
+      const found = findCase(params.reference)
+      return found ? ok(detailOf(found)) : fail(404)
+    }),
+    'POST /emergencies/:reference/actions/': edit('emergencies', ({ params, body }) => {
+      const found = findCase(params.reference)
+      if (!found) return fail(404)
+      const { action, note } = body as { action: CaseAction; note: string }
+      const next = nextStatus(found.status, action)
+      if (!next) return fail(409, { detail: `Can't ${action} a case that is ${STATUS_LABEL[found.status].toLowerCase()}.` })
+      const entry: StatusChange = {
+        fromStatus: found.status,
+        toStatus: next,
+        action,
+        note: note.trim(),
+        actor: role ? NAMES[role] : null,
+        at: new Date().toISOString(),
+      }
+      histories.set(found.id, [...(histories.get(found.id) ?? []), entry])
+      found.status = next
+      return ok(detailOf(found))
     }),
 
     'GET /users/': view('users', () => ok(users)),
