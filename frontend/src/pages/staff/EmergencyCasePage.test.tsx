@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail, mockApi, mockStaffApi, userFor } from '../../test/mockApi'
 import { renderStaff } from '../../test/renderStaff'
 import { sampleCases, sampleNewNeedsCase, sampleThreeNeedSources } from '../../test/fixtures/emergencies'
-import type { StatusChange } from '../../api/emergencies'
+import { allocateReservation, type StatusChange } from '../../api/emergencies'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -500,5 +500,83 @@ describe('EmergencyCasePage stock holds (story #43)', () => {
     await details()
     expect(screen.queryByRole('button', { name: /Reserve/ })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Reservations' })).toBeNull()
+  })
+})
+
+describe('EmergencyCasePage allocation (stories #45, #46)', () => {
+  const holds = async () => screen.findByRole('region', { name: 'Reservations' })
+  const oneBloodHold = [{ reference: 'EC-2026-0002', itemId: 1, count: 1 }]
+  const postsTo = (fetchMock: ReturnType<typeof mockStaffApi>['fetchMock'], path: string) =>
+    fetchMock.mock.calls.filter(([url, init]) => String(url).includes(path) && init?.method === 'POST')
+
+  it('allocates a held reservation: the status, the remaining quantity and the timeline all update', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { fetchMock } = mockStaffApi({ role: 'admin', held: oneBloodHold })
+    renderStaff(CASE)
+
+    const panel = await holds()
+    expect(within(await details()).getByText('0 of 4 allocated · 4 remaining')).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Allocate O− red cells DN-0001' }))
+
+    expect(await within(panel).findByText('Allocated O− red cells DN-0001.')).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: /^Allocate/ })).toBeNull()
+    expect(within(panel).getByText('Allocated')).toBeInTheDocument()
+    expect(within(await details()).getByText('Partially fulfilled')).toBeInTheDocument()
+    expect(within(await details()).getByText('1 of 4 allocated · 3 remaining')).toBeInTheDocument()
+    expect(await entryHeadings()).toEqual([
+      'Case opened',
+      'Open → Matching',
+      'Allocated O− red cells DN-0001 from CityCare General Hospital by Sadia Admin',
+      'Matching → Partially fulfilled',
+    ])
+    const [call] = postsTo(fetchMock, '/reservations/1/allocate/')
+    expect(JSON.parse(String(call![1]!.body))).toEqual({ note: '' })
+  })
+
+  it('says a need is fully allocated, and the case fulfilled, once every unit is allocated', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockStaffApi({ role: 'nurse', held: [{ reference: 'EC-2026-0001', itemId: 1, count: 2 }] })
+    renderStaff('/staff/emergencies/EC-2026-0001')
+
+    const panel = await holds()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Allocate Bed GENERAL-01' }))
+    await within(panel).findByText('Allocated Bed GENERAL-01.')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Allocate Bed GENERAL-02' }))
+    await within(panel).findByText('Allocated Bed GENERAL-02.')
+
+    const facts = await screen.findByRole('region', { name: 'EC-2026-0001' })
+    expect(within(facts).getByText('Fully allocated')).toBeInTheDocument()
+    expect(within(facts).getByText('Fulfilled')).toBeInTheDocument()
+  })
+
+  it('does nothing when the confirm is declined', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { fetchMock } = mockStaffApi({ role: 'admin', held: oneBloodHold })
+    renderStaff(CASE)
+
+    await userEvent.click(within(await holds()).getByRole('button', { name: 'Allocate O− red cells DN-0001' }))
+    expect(postsTo(fetchMock, '/allocate/')).toHaveLength(0)
+  })
+
+  it('offers no Allocate button where the role can’t allocate the type (a doctor can only view blood)', async () => {
+    mockStaffApi({ role: 'doctor', held: oneBloodHold })
+    renderStaff(CASE)
+
+    const panel = await holds()
+    expect(within(panel).getByRole('button', { name: 'Release O− red cells DN-0001' })).toBeInTheDocument()
+    expect(within(panel).queryByRole('button', { name: /^Allocate/ })).toBeNull()
+  })
+
+  it('shows the server’s reason when the allocation is refused (409), and changes nothing', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockStaffApi({ role: 'admin', held: oneBloodHold })
+    renderStaff(CASE)
+
+    const panel = await holds()
+    await allocateReservation(1) // someone else allocates it first; this page still shows it as held
+    await userEvent.click(within(panel).getByRole('button', { name: 'Allocate O− red cells DN-0001' }))
+
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('This reservation is already allocated.')
+    expect(within(await details()).getByText('0 of 4 allocated · 4 remaining')).toBeInTheDocument()
   })
 })

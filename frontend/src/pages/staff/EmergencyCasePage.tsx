@@ -2,6 +2,7 @@ import { useCallback, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError } from '../../api/client'
 import {
+  allocateReservation,
   getCandidates,
   getCase,
   MAX_NOTE,
@@ -13,6 +14,7 @@ import {
   type Candidate,
   type CandidateItem,
   type CaseAction,
+  type CaseAllocation,
   type CaseReservation,
   type EmergencyCaseDetail,
   type HospitalMatch,
@@ -25,7 +27,17 @@ import { TextField } from '../../components/form/TextField'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { CaseStatusLabel } from '../../features/emergencies/CaseStatusLabel'
-import { ACTION_LABEL, describeMove, describeNeed, SEVERITY_TONE, shortfallSummary, STATUS_LABEL } from '../../features/emergencies/emergencies'
+import {
+  ACTION_LABEL,
+  describeMove,
+  describeNeed,
+  SEVERITY_TONE,
+  shortfallSummary,
+  STATUS_LABEL,
+  timelineOf,
+  withMinus,
+  type TimelineEntry,
+} from '../../features/emergencies/emergencies'
 import styles from '../../features/emergencies/Emergencies.module.css'
 import { canEdit } from '../../features/staff/roles'
 import { useStaff } from '../../features/staff/staffContext'
@@ -102,8 +114,13 @@ function CaseView({ reference }: { reference: string }) {
                   <span>{describeNeed(need)}</span>{' '}
                   <span className={styles.hint}>
                     Available here: {need.localAvailable} · {need.shortfall > 0 ? `Short: ${need.shortfall}` : 'Covered locally'}
+                  </span>{' '}
+                  <span className={styles.hint}>
+                    {need.remaining === 0
+                      ? 'Fully allocated'
+                      : `${need.fulfilled} of ${need.quantity} allocated · ${need.remaining} remaining`}
                   </span>
-                  {canEdit(role, 'emergencies') && need.localAvailable > 0 && need.quantity > need.reserved && (
+                  {canEdit(role, 'emergencies') && need.localAvailable > 0 && need.remaining > need.reserved && (
                     <ReserveHere
                       key={`${need.itemId}-${need.localAvailable}-${need.reserved}`}
                       reference={kase.id}
@@ -138,13 +155,10 @@ function CaseView({ reference }: { reference: string }) {
       )}
 
       {canEdit(role, 'emergencies') && <CaseMoves kase={kase} onMoved={(updated) => setData(() => updated)} />}
-      <Timeline history={kase.history} />
+      <Timeline entries={timelineOf(kase.history, kase.allocations)} />
     </div>
   )
 }
-
-/** The server's blood group code, with the minus sign the rest of the page uses: "O- red cells" → "O− red cells". */
-const withMinus = (label: string) => label.replace(/^(AB|A|B|O)-/, '$1−')
 
 /** Distance and travel time as the sources lists show them: "4.2 km · ~6 min". */
 function distanceText(place: { distanceKm: number | null; travelMinutes: number | null }): string {
@@ -313,7 +327,7 @@ function ReserveHere({
   need: AvailableNeed
   onReserved: (message: string) => void
 }) {
-  const remaining = need.quantity - need.reserved
+  const remaining = need.remaining - need.reserved
   const [count, setCount] = useState(String(Math.min(need.localAvailable, remaining)))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -376,19 +390,35 @@ function Reservations({
   notice: string
   onChanged: (message: string) => void
 }) {
-  const [releasing, setReleasing] = useState<number>()
+  const [working, setWorking] = useState<{ id: number; kind: 'release' | 'allocate' }>()
   const [error, setError] = useState<string>()
 
   async function release(hold: CaseReservation) {
     setError(undefined)
-    setReleasing(hold.id)
+    setWorking({ id: hold.id, kind: 'release' })
     try {
       const released = await releaseReservation(reference, hold.id)
       onChanged(`Released ${withMinus(released.resource)}.`)
     } catch (failure) {
       setError(reservationFailure(failure))
     } finally {
-      setReleasing(undefined)
+      setWorking(undefined)
+    }
+  }
+
+  /** Confirm, then hand the held resource over to this case (story #46). The case is read again on success. */
+  async function allocate(hold: CaseReservation) {
+    const name = withMinus(hold.resource)
+    if (!window.confirm(`Allocate ${name} to ${reference}? This confirms it for the case.`)) return
+    setError(undefined)
+    setWorking({ id: hold.id, kind: 'allocate' })
+    try {
+      await allocateReservation(hold.id)
+      onChanged(`Allocated ${name}.`)
+    } catch (failure) {
+      setError(reservationFailure(failure))
+    } finally {
+      setWorking(undefined)
     }
   }
 
@@ -418,18 +448,32 @@ function Reservations({
                 )}{' '}
                 · <span>{hold.hospital.name}</span> · <span>reserved by {hold.reservedBy}</span>
               </div>
-              {canRelease && hold.status === 'held' && (
+              {((canRelease && hold.status === 'held') || hold.canAllocate) && (
                 <div className={styles.moves}>
-                  <button
-                    type="button"
-                    className={styles.secondaryAction}
-                    disabled={releasing !== undefined}
-                    aria-busy={releasing === hold.id}
-                    aria-label={`Release ${withMinus(hold.resource)}`}
-                    onClick={() => release(hold)}
-                  >
-                    {releasing === hold.id ? 'Releasing…' : 'Release'}
-                  </button>
+                  {hold.canAllocate && (
+                    <button
+                      type="button"
+                      className={styles.secondaryAction}
+                      disabled={working !== undefined}
+                      aria-busy={working?.id === hold.id && working.kind === 'allocate'}
+                      aria-label={`Allocate ${withMinus(hold.resource)}`}
+                      onClick={() => allocate(hold)}
+                    >
+                      {working?.id === hold.id && working.kind === 'allocate' ? 'Allocating…' : 'Allocate'}
+                    </button>
+                  )}
+                  {canRelease && hold.status === 'held' && (
+                    <button
+                      type="button"
+                      className={styles.secondaryAction}
+                      disabled={working !== undefined}
+                      aria-busy={working?.id === hold.id && working.kind === 'release'}
+                      aria-label={`Release ${withMinus(hold.resource)}`}
+                      onClick={() => release(hold)}
+                    >
+                      {working?.id === hold.id && working.kind === 'release' ? 'Releasing…' : 'Release'}
+                    </button>
+                  )}
                 </div>
               )}
             </li>
@@ -440,7 +484,7 @@ function Reservations({
   )
 }
 
-/** Why a hold or a release didn't happen: the server's words for a 400 or 409, or a plain failure. */
+/** Why a hold, release or allocation didn't happen: the server's words for a 400 or 409, or a plain failure. */
 function reservationFailure(error: unknown): string {
   if (error instanceof ApiError && error.status !== 0 && error.status < 500) {
     const detail = typeof error.body === 'object' && error.body !== null ? (error.body as { detail?: unknown }).detail : undefined
@@ -601,32 +645,59 @@ function moveFailure(error: unknown): string {
   return 'The hospital’s system didn’t respond, so the case wasn’t changed. Try again.'
 }
 
-/** Every move, oldest first, in the order the server sends. An entry with no actor was made by the system. */
-function Timeline({ history }: { history: StatusChange[] }) {
+/**
+ * Every status move and every allocation (story #45), oldest first. An entry with no actor was made by the system.
+ */
+function Timeline({ entries }: { entries: TimelineEntry[] }) {
   return (
     <Panel title="Status history" id="history">
-      {history.length === 0 ? (
+      {entries.length === 0 ? (
         <p>No history yet.</p>
       ) : (
         <ol className={styles.timeline}>
-          {history.map((change, i) => {
-            const at = new Date(change.at)
-            return (
-              <li key={i}>
-                <strong>{describeMove(change)}</strong>
-                <span className={styles.hint}>
-                  <time dateTime={change.at}>
-                    {formatShortDate(at)}, {formatClock(at)}
-                  </time>
-                  {' · '}
-                  {change.actor ?? 'System'}
-                </span>
-                {change.note && <p className={styles.entryNote}>{change.note}</p>}
-              </li>
-            )
-          })}
+          {entries.map((entry) =>
+            entry.kind === 'move' ? (
+              <MoveEntry key={`move-${entry.at}-${entry.change.action}`} change={entry.change} />
+            ) : (
+              <AllocationEntry key={`allocation-${entry.allocation.id}`} allocation={entry.allocation} />
+            ),
+          )}
         </ol>
       )}
     </Panel>
+  )
+}
+
+function MoveEntry({ change }: { change: StatusChange }) {
+  const at = new Date(change.at)
+  return (
+    <li>
+      <strong>{describeMove(change)}</strong>
+      <span className={styles.hint}>
+        <time dateTime={change.at}>
+          {formatShortDate(at)}, {formatClock(at)}
+        </time>
+        {' · '}
+        {change.actor ?? 'System'}
+      </span>
+      {change.note && <p className={styles.entryNote}>{change.note}</p>}
+    </li>
+  )
+}
+
+function AllocationEntry({ allocation }: { allocation: CaseAllocation }) {
+  const at = new Date(allocation.at)
+  return (
+    <li>
+      <strong>
+        Allocated {withMinus(allocation.resource)} from {allocation.hospital.name} by {allocation.allocatedBy}
+      </strong>
+      <span className={styles.hint}>
+        <time dateTime={allocation.at}>
+          {formatShortDate(at)}, {formatClock(at)}
+        </time>
+      </span>
+      {allocation.note && <p className={styles.entryNote}>{allocation.note}</p>}
+    </li>
   )
 }
