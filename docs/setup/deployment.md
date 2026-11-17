@@ -64,6 +64,15 @@ Strategies: `earliestExpiry` (expiry, compatibility, distance, quantity), `neare
 (quantity, distance). A weight for a factor the strategy does not use is refused. On Render, set `MATCHING_SCORING` on
 the **Environment** tab.
 
+### Resource holds (#43)
+A reserved resource is held for a case for `RESERVATION_HOLD_MINUTES` (default `30`, a whole number of 1 or more; the
+server refuses to start on any other value). When the hold runs out, the resource goes back to stock. Changing the value
+does not move holds already made. Set it on Render's **Environment** tab.
+
+The free Render plan has no scheduled jobs, so the API releases expired holds itself whenever someone opens a case, its
+candidates or a reservation endpoint. A scheduler can run the same release with
+`python manage.py release_expired_reservations`, which prints how many holds it released.
+
 ### Demo data
 The Render build runs `seed_demo` (it only adds data to empty tables), so staging has the demo hospitals,
 beds, blood units and one login per role (`admin@`, `doctor@`, `nurse@`, `bloodbank@`, `pharmacist@`,

@@ -115,10 +115,12 @@ Users at a hospital see only its cases (another hospital's case → **404**); st
 |---|---|---|---|---|
 | GET | `/emergencies/` | – | `EmergencyCase[]`, most severe first, then oldest first. Escalates overdue cases first (#35) | #30, #31, #35 |
 | POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
-| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions`, `outcome` and local availability. Escalates overdue cases first (#35) | #30, #33, #34, #35 |
+| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions`, `outcome`, local availability and its holds (`reservations`). Escalates overdue cases and frees expired holds first (#35, #43) | #30, #33, #34, #35, #43 |
 | POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
 | GET | `/emergencies/feed/?type=blood\|bed\|equipment\|operatingRoom` | – | `FeedEntry[]`: every hospital's active requests of that type, most urgent first, at most 100. Escalates overdue cases first (#35) | #36, #38 |
-| GET | `/emergencies/<id>/candidates/` | – | `CandidatesResponse`: the other hospitals that can supply each short need, and the hospitals judged across all of them (see [Sources in the network](#sources-in-the-network-38) and [Hospitals across the needs](#hospitals-across-the-needs-42)). Does not escalate | #38, #42 |
+| GET | `/emergencies/<id>/candidates/` | – | `CandidatesResponse`: the other hospitals that can supply each short need, and the hospitals judged across all of them (see [Sources in the network](#sources-in-the-network-38) and [Hospitals across the needs](#hospitals-across-the-needs-42)). Does not escalate; frees expired holds first (#43) | #38, #42, #43 |
+| POST | `/emergencies/<id>/reservations/` | `{itemId, quantity}` | 201 `CaseReservation[]`: the holds made at the case's own hospital (see [Stock holds](#stock-holds-43)) | #43 |
+| POST | `/emergencies/<id>/reservations/<holdId>/release/` | – | 200 `CaseReservation`, now `released`; 409 when it is no longer held | #43 |
 
 ```ts
 EmergencyCase = {
@@ -216,10 +218,13 @@ The detail says what the case's own hospital has for each need. The list does no
 ```ts
 EmergencyCaseDetail = EmergencyCase & {
   items: (RequestItem & {
-    localAvailable: number,     // usable stock at the case's hospital that matches this need exactly
-    shortfall: number           // max(0, quantity - fulfilled - localAvailable)
+    itemId: number,             // the need's id, for reserving stock for it (#43)
+    localAvailable: number,     // usable stock at the case's hospital that matches this need exactly, free of holds
+    shortfall: number,          // max(0, quantity - fulfilled - held - allocated - localAvailable)
+    reserved: number            // the need's holds not yet allocated (#43)
   })[],
-  shortfallTotal: number        // sum of the items' shortfall: units and beds still needed from other hospitals
+  shortfallTotal: number,       // sum of the items' shortfall: units and beds still needed from other hospitals
+  reservations: CaseReservation[]  // the holds on the case's stock, held and allocated (#43)
 }
 ```
 
@@ -227,6 +232,7 @@ EmergencyCaseDetail = EmergencyCase & {
   status `available`, and not expired (`expires_at` after now, the same rule as the stock view). Quarantined, reserved,
   issued, discarded and expired units do not count. **Compatible groups do not count** (O− for an A+ need, for example):
   cross-group matching is story #37.
+- A resource held by a reservation (#43) is in its reserved status, so it no longer counts in any of the above.
 - **Beds** count free beds (`status` `free`) of the need's `bedType` at the case's hospital.
 - **Equipment** counts available equipment (`status` `available`) of the need's `equipmentType` at the case's hospital.
   In use, in maintenance and out of service do not count.
@@ -236,6 +242,8 @@ EmergencyCaseDetail = EmergencyCase & {
 - Requirements that draw on the same stock share it in list order: the first sees the whole stock, the next sees what
   is left after it.
 - A case with no hospital has `localAvailable` 0 for every need, so each need's shortfall is what is still unfulfilled.
+- A need's holds (#43) come off its quantity before its shortfall is worked out, so a case does not ask other hospitals
+  for stock it already holds here. A held resource is not free, so it is not in `localAvailable` either.
 - The shortfalls are computed on read and never stored. The matching step (#38) reads them through
   `shortfall_items(case)` in `backend/apps/emergencies/availability.py`.
 
@@ -431,13 +439,13 @@ Equipment = {
   id: number, identifier: string,   // asset tag, stored upper-case, unique within a hospital (400 otherwise)
   type: 'ventilator' | 'monitor' | 'defibrillator' | 'dialysis',
   name: string, location: string,
-  status: 'available' | 'inUse' | 'maintenance' | 'outOfService',  // defaults to available
+  status: 'available' | 'reserved' | 'inUse' | 'maintenance' | 'outOfService',  // defaults to available
   statusSince: string, hospital: string | null
 }
 ```
 
-Equipment actions (#27): `use`, `release`, `startMaintenance`, `finishMaintenance`, `outOfService`,
-`returnToService`. The lifecycle is in `apps/equipment/models.py`. A move it doesn't allow (e.g. using equipment
+Equipment actions (#27): `use`, `release`, `reserve`, `cancelReservation`, `startMaintenance`, `finishMaintenance`,
+`outOfService`, `returnToService`. `reserve` and `cancelReservation` are the moves a hold makes (#43); see [Stock holds](#stock-holds-43). The lifecycle is in `apps/equipment/models.py`. A move it doesn't allow (e.g. using equipment
 that is in maintenance) returns **409** and changes nothing. Unknown action → 400; equipment outside the user's
 hospital → 404. Every change is audit-logged (`equipment.status_changed`) with the optional `reason`.
 `Equipment.objects.matchable()` returns only `available` items; the matching engine uses it so in-use,
@@ -460,13 +468,14 @@ OperatingRoom = {
   capabilities: ('general' | 'cardiac' | 'trauma' | 'neuro' | 'orthopedic' | 'obstetric' | 'pediatric')[],
                               // at least one (400 otherwise); stored sorted, without repeats
   location: string,           // e.g. "Block B, floor 2", may be empty
-  status: 'available' | 'inUse' | 'cleaning' | 'maintenance' | 'outOfService',  // defaults to available
+  status: 'available' | 'reserved' | 'inUse' | 'cleaning' | 'maintenance' | 'outOfService',  // defaults to available
   statusSince: string, hospital: string | null
 }
 ```
 
-Actions: `startCase`, `finishCase`, `finishCleaning`, `startMaintenance`, `finishMaintenance`, `outOfService`,
-`returnToService`. The lifecycle is in `apps/operating_rooms/models.py`. A move it doesn't allow returns **409**
+Actions: `startCase`, `reserve`, `cancelReservation`, `finishCase`, `finishCleaning`, `startMaintenance`,
+`finishMaintenance`, `outOfService`, `returnToService`. `reserve` and `cancelReservation` are the moves a hold makes
+(#43); `startCase` from `reserved` starts a case that held the room. The lifecycle is in `apps/operating_rooms/models.py`. A move it doesn't allow returns **409**
 and changes nothing. Unknown action → 400. A room outside the user's hospital → 404 (admins can change any
 hospital's room). Registration is audit-logged as `operatingroom.registered`; status changes as
 `operatingroom.status_changed` (the shared `change_status` helper names them after the model).
@@ -516,6 +525,56 @@ Booking = {
 - Booking and cancelling are audit-logged as `orbooking.created` and `orbooking.cancelled`. Cancelling keeps the row.
 - The schedule lists only `booked` slots that overlap the local calendar day, in time order. A slot that runs past
   midnight appears on both days.
+
+## Stock holds (#43)
+
+A case can hold local stock while staff decide. A hold moves the resource to its reserved status (`reserve`), so every
+search for stock stops offering it: the local availability, the candidates for other cases, the compatible blood units
+and the matchable equipment and rooms. Nothing new filters them; they look for an available or free status.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| POST | `/emergencies/<id>/reservations/` | `{itemId, quantity}` | 201 `CaseReservation[]`, the holds made |
+| POST | `/emergencies/<id>/reservations/<holdId>/release/` | – | 200 `CaseReservation`, now `released` |
+
+Module `emergencies`, **edit**. The case is looked up under the user's hospital (another hospital's case is **404**), and
+a role without edit rights is **403**.
+
+```ts
+CaseReservation = {
+  id: number,
+  itemId: number,                          // the need it is for
+  resource: string,                        // "O- red cells DN-0042", "Bed ICU-03", "Ventilator VENT-003" or "OR 1"
+  hospital: { id: number, name: string },  // the resource's hospital
+  status: 'held' | 'allocated' | 'released' | 'expired',
+  expiresAt: string,                       // when an unused hold runs out
+  reservedBy: string                       // the person's name, or their email
+}
+```
+
+- **Reserving** takes stock at the case's own hospital: up to `quantity` of the need's resources. Blood comes in donor
+  rank order, then earliest expiry, then id (the compatibility order of #37, so exact groups first); the other types by
+  id. If fewer are free, what is there is taken and the response lists the holds, so the caller sees the count.
+- **Refused** with **400** and nothing changed:
+  - `{"detail": "No matching stock is free at this hospital."}` when nothing is free.
+  - `{"detail": "Only 2 more can be reserved for this need."}` when `quantity` is more than the need has left: its
+    quantity, less its fulfilled count and its active holds.
+  - `{"detail": "Can't reserve stock for a case that is closed."}` for a fulfilled, closed or cancelled case.
+  - `{"itemId": ["No need with that id on this case."]}` for a need that is not on this case, and `{"quantity": [...]}`
+    for a quantity below 1.
+- **Release** answers **409** `{"detail": "This reservation is released, so it can't be released."}` when the hold is not
+  `held` any more (allocated, released or expired). A released hold returns its resource to its available or free status.
+  If the resource has already moved on (issued, expired), the hold ends and the resource is left as it is.
+- **Hold time:** `RESERVATION_HOLD_MINUTES` (default 30), set on the hold when it is made. Changing the setting later does
+  not move the holds already made. See [deployment](../setup/deployment.md#resource-holds-43).
+- **Expiry** releases every held hold past its `expiresAt` back to stock, and records it as `expired` with no actor. It
+  runs before the candidates GET, the case detail GET and both reservation endpoints, and from the management command
+  `python manage.py release_expired_reservations`, which prints how many it released.
+- **Case move:** reserving stock for an **open** case moves it to **matching**, as a system move (its timeline entry has
+  no actor). An escalated, matching or partially fulfilled case stays where it is.
+- **Audit:** `reservation.created` for each hold (the resource, its expiry and the reason), `reservation.released`,
+  `reservation.expired`, and `<model>.status_changed` for each resource move.
+- **Detail:** `reservations` lists the held and allocated holds of the case. Each item's `reserved` counts its held ones.
 
 ## Demo data
 
