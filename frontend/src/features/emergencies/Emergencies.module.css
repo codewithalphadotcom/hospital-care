@@ -303,11 +303,78 @@
   display: grid;
   gap: var(--space-3);
   margin: 0;
-  padding-left: var(--space-5);
+  padding: 0;
+  list-style: none;
 }
 
 .candidates .hint {
   display: block;
+}
+
+.candidate,
+.recommended {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: var(--stripe) solid transparent;
+}
+
+/* The top source is marked by its "Recommended" badge and by shape (a thick edge and a tint), not by colour alone. */
+.recommended {
+  border-left-color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+.candidateTop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.rank,
+.score {
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.score {
+  margin-left: auto;
+}
+
+.badge {
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.why summary {
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.factors {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factorTotal {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--rule);
+  font-weight: 700;
+}
+
+.points {
+  white-space: nowrap;
+  font-weight: 700;
 }
 
 .marker {

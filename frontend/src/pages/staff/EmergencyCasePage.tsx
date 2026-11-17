@@ -11,6 +11,7 @@ import {
   type CandidateItem,
   type CaseAction,
   type EmergencyCaseDetail,
+  type Score,
   type StatusChange,
 } from '../../api/emergencies'
 import { FormAlert } from '../../components/form/FormAlert'
@@ -122,8 +123,9 @@ function distanceText(candidate: Candidate): string {
 }
 
 /**
- * The other hospitals that can supply each short need (story #38). A plain list: ranking and scores are #41. Asked
- * for only when the case has a shortfall, so a case covered locally makes no extra request.
+ * The other hospitals that can supply each short need (story #38), best first with their scores (story #41). The
+ * server ranks them and this shows that order as it comes. Asked for only when the case has a shortfall, so a case
+ * covered locally makes no extra request.
  */
 function Sources({ reference }: { reference: string }) {
   const load = useCallback(() => getCandidates(reference), [reference])
@@ -145,7 +147,7 @@ function Sources({ reference }: { reference: string }) {
   )
 }
 
-/** One short need and the hospitals that have it, or the empty state when none do. */
+/** One short need and the hospitals that have it, best first, or the empty state when none do. */
 function SourceItem({ item }: { item: CandidateItem }) {
   return (
     <section className={styles.source}>
@@ -155,24 +157,61 @@ function SourceItem({ item }: { item: CandidateItem }) {
       {item.candidates.length === 0 ? (
         <p className={styles.hint}>No other hospital has this right now</p>
       ) : (
-        <ul className={styles.candidates}>
-          {item.candidates.map((candidate) => (
-            <li key={candidate.hospital.id}>
-              <strong>{candidate.hospital.name}</strong>{' '}
-              <span>{candidate.available} available</span>{' · '}
-              <span className={styles.marker}>{candidate.covers ? 'covers it' : 'partial'}</span>
-              <span className={styles.hint}>{distanceText(candidate)}</span>
-              {candidate.earliestExpiry && (
-                <span className={styles.hint}>
-                  Earliest expiry{' '}
-                  <time dateTime={candidate.earliestExpiry}>{formatShortDate(new Date(candidate.earliestExpiry))}</time>
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          <p className={styles.hint}>Ordered by {item.strategy.label.toLowerCase()}</p>
+          <ul className={styles.candidates}>
+            {item.candidates.map((candidate) => (
+              <SourceRow key={candidate.hospital.id} candidate={candidate} strategyLabel={item.strategy.label} />
+            ))}
+          </ul>
+        </>
       )}
     </section>
+  )
+}
+
+/** One hospital in a short need's list: its rank, score, stock, distance, and why it scored as it did. */
+function SourceRow({ candidate, strategyLabel }: { candidate: Candidate; strategyLabel: string }) {
+  return (
+    <li className={candidate.recommended ? styles.recommended : styles.candidate}>
+      <div className={styles.candidateTop}>
+        <span className={styles.rank}>Rank {candidate.rank}</span>
+        <strong>{candidate.hospital.name}</strong>
+        {candidate.recommended && <span className={styles.badge}>Recommended</span>}
+        <span className={styles.score}>{candidate.score.total.toFixed(1)} / 100</span>
+      </div>
+      <div>
+        <span>{candidate.available} available</span>{' · '}
+        <span className={styles.marker}>{candidate.covers ? 'covers it' : 'partial'}</span>{' · '}
+        <span>{distanceText(candidate)}</span>
+      </div>
+      {candidate.earliestExpiry && (
+        <span className={styles.hint}>
+          Earliest expiry <time dateTime={candidate.earliestExpiry}>{formatShortDate(new Date(candidate.earliestExpiry))}</time>
+        </span>
+      )}
+      <ScoreBreakdown score={candidate.score} strategyLabel={strategyLabel} />
+    </li>
+  )
+}
+
+/** "Why this score?": each factor's label, reason and points, then the total the points add up to (story #41). */
+function ScoreBreakdown({ score, strategyLabel }: { score: Score; strategyLabel: string }) {
+  return (
+    <details className={styles.why}>
+      <summary>Why this score?</summary>
+      <p className={styles.hint}>Strategy: {strategyLabel}</p>
+      <ul className={styles.factors}>
+        {score.factors.map((factor) => (
+          <li key={factor.name}>
+            <strong>{factor.label}</strong>: {factor.detail} <span className={styles.points}>{factor.points.toFixed(1)} points</span>
+          </li>
+        ))}
+        <li className={styles.factorTotal}>
+          Total <span className={styles.points}>{score.total.toFixed(1)} of 100</span>
+        </li>
+      </ul>
+    </details>
   )
 }
 

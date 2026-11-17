@@ -266,7 +266,7 @@ describe('EmergencyCasePage: the new kinds of need and sources in the network (#
     expect(within(riverside).getByText('5 available')).toBeInTheDocument()
     expect(within(riverside).getByText('covers it')).toBeInTheDocument()
     expect(within(riverside).getByText('4.2 km · ~6 min')).toBeInTheDocument()
-    expect(within(riverside).getByText(/Earliest expiry/)).toBeInTheDocument()
+    expect(within(riverside).getByText(/Earliest expiry/, { selector: 'span' })).toBeInTheDocument()
     const northside = within(blood).getByText("Northside Children's Hospital").closest('li')!
     expect(within(northside).getByText('1 available')).toBeInTheDocument()
     expect(within(northside).getByText('partial')).toBeInTheDocument()
@@ -300,5 +300,77 @@ describe('EmergencyCasePage: the new kinds of need and sources in the network (#
     await screen.findByRole('region', { name: 'EC-2026-0001' })
     expect(screen.queryByRole('region', { name: 'Sources in the network' })).toBeNull()
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/candidates/'))).toBe(false)
+  })
+})
+
+/** The rows of one short need's list, in the order they are on the screen (not the nested factor lists). */
+async function sourceRows(need: string): Promise<HTMLElement[]> {
+  const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+  const section = (await within(sources).findByRole('heading', { name: need })).closest('section')!
+  return Array.from(section.querySelector('ul')!.children) as HTMLElement[]
+}
+
+describe('EmergencyCasePage: ranked sources and their scores (#41)', () => {
+  it('shows the sources in the order the server ranks them, each with its rank and score', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const [first, second] = await sourceRows('O− red cells: short 3')
+    expect(within(first!).getByText('Riverside Medical Centre')).toBeInTheDocument()
+    expect(within(first!).getByText('Rank 1')).toBeInTheDocument()
+    expect(within(first!).getByText('87.6 / 100')).toBeInTheDocument()
+    expect(within(second!).getByText("Northside Children's Hospital")).toBeInTheDocument()
+    expect(within(second!).getByText('Rank 2')).toBeInTheDocument()
+    expect(within(second!).getByText('69.7 / 100')).toBeInTheDocument()
+  })
+
+  it('labels only the top source as recommended, with a badge as well as its emphasis', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const [first, second] = await sourceRows('O− red cells: short 3')
+    expect(within(first!).getByText('Recommended')).toBeInTheDocument()
+    expect(within(second!).queryByText('Recommended')).toBeNull()
+  })
+
+  it('says how each list is ordered', async () => {
+    mockStaffApi({ role: 'doctor', cases: [sampleNewNeedsCase(new Date())] })
+    renderStaff('/staff/emergencies/EC-2026-0003')
+
+    const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+    const vents = (await within(sources).findByRole('heading', { name: 'Ventilator: short 1' })).closest('section')!
+    expect(within(vents).getByText('Ordered by nearest first')).toBeInTheDocument()
+  })
+
+  it('explains each score in a disclosure: every factor with its reason and points, then the total', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const [first] = await sourceRows('O− red cells: short 3')
+    const why = within(first!).getByText('Why this score?').closest('details')!
+    expect(why.open).toBe(false)
+    expect(within(why).getByText('Strategy: Earliest expiry first')).toBeInTheDocument()
+
+    const lines = Array.from(why.querySelectorAll('li')).map((li) => li.textContent?.replace(/\s+/g, ' ').trim())
+    expect(lines).toEqual([
+      'Expiry: expires in 9 days 39.3 points',
+      'Blood group match: identical group 20.0 points',
+      'Distance: 4.2 km, about 6 min 18.3 points',
+      'Stock: 5 available, 3 needed 10.0 points',
+      'Total 87.6 of 100',
+    ])
+    const points = Array.from(why.querySelectorAll('li'))
+      .slice(0, -1)
+      .map((li) => Number(li.querySelector('span')!.textContent!.replace(' points', '')))
+    expect(points.reduce((sum, p) => sum + p, 0)).toBeCloseTo(87.6, 1)
+  })
+
+  it('shows the distance and travel time of each source, and "Distance unknown" when it is not known', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const [riverside, northside] = await sourceRows('O− red cells: short 3')
+    expect(within(riverside!).getByText('4.2 km · ~6 min')).toBeInTheDocument()
+    expect(within(northside!).getByText('Distance unknown')).toBeInTheDocument()
   })
 })
