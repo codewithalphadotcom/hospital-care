@@ -392,6 +392,15 @@
   gap: var(--space-3);
 }
 
+/* "Reserve N here" under a need (story #43): the quantity field and its button sit side by side on wide screens. */
+.reserve {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
 .timeline {
   display: grid;
   gap: var(--space-4);

@@ -6,10 +6,14 @@ import {
   getCase,
   MAX_NOTE,
   postCaseAction,
+  releaseReservation,
+  reserveStock,
   SEVERITIES,
+  type AvailableNeed,
   type Candidate,
   type CandidateItem,
   type CaseAction,
+  type CaseReservation,
   type EmergencyCaseDetail,
   type HospitalMatch,
   type Score,
@@ -43,6 +47,12 @@ function CaseView({ reference }: { reference: string }) {
   const { role } = useStaff()
   const load = useCallback(() => getCase(reference), [reference])
   const { result, setData } = useLoad(load)
+  const [notice, setNotice] = useState('')
+  /** After a hold is made or released, the case is read again so its figures and holds are the server's. */
+  const refreshCase = (message: string) => {
+    setNotice(message)
+    void getCase(reference).then((fresh) => setData(() => fresh))
+  }
 
   if (result.state === 'failed' && result.status === 404) {
     return (
@@ -87,12 +97,20 @@ function CaseView({ reference }: { reference: string }) {
           <dt>Needed</dt>
           <dd>
             <ul className={styles.needs}>
-              {kase.items.map((need, i) => (
-                <li key={i}>
+              {kase.items.map((need) => (
+                <li key={need.itemId}>
                   <span>{describeNeed(need)}</span>{' '}
                   <span className={styles.hint}>
                     Available here: {need.localAvailable} · {need.shortfall > 0 ? `Short: ${need.shortfall}` : 'Covered locally'}
                   </span>
+                  {canEdit(role, 'emergencies') && need.localAvailable > 0 && need.quantity > need.reserved && (
+                    <ReserveHere
+                      key={`${need.itemId}-${need.localAvailable}-${need.reserved}`}
+                      reference={kase.id}
+                      need={need}
+                      onReserved={refreshCase}
+                    />
+                  )}
                 </li>
               ))}
             </ul>
@@ -100,6 +118,16 @@ function CaseView({ reference }: { reference: string }) {
           </dd>
         </dl>
       </Panel>
+
+      {(kase.reservations.length > 0 || canEdit(role, 'emergencies')) && (
+        <Reservations
+          reference={kase.id}
+          holds={kase.reservations}
+          canRelease={canEdit(role, 'emergencies')}
+          notice={notice}
+          onChanged={refreshCase}
+        />
+      )}
 
       {kase.shortfallTotal > 0 && <Sources reference={kase.id} />}
 
@@ -270,6 +298,155 @@ function ScoreBreakdown({ score, strategyLabel }: { score: Score; strategyLabel:
       </ul>
     </details>
   )
+}
+
+/**
+ * "Reserve N here" for one need (story #43): how many of this hospital's stock to hold for the case. It starts at the
+ * smaller of what is free here and what the need still lacks. The server has the last word on both.
+ */
+function ReserveHere({
+  reference,
+  need,
+  onReserved,
+}: {
+  reference: string
+  need: AvailableNeed
+  onReserved: (message: string) => void
+}) {
+  const remaining = need.quantity - need.reserved
+  const [count, setCount] = useState(String(Math.min(need.localAvailable, remaining)))
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string>()
+  const asked = Number(count)
+  const valid = Number.isInteger(asked) && asked >= 1 && asked <= remaining
+
+  async function reserve(event: FormEvent) {
+    event.preventDefault()
+    if (!valid) {
+      setError(`Enter a whole number from 1 to ${remaining}.`)
+      return
+    }
+    setError(undefined)
+    setPending(true)
+    try {
+      const holds = await reserveStock(reference, need.itemId, asked)
+      onReserved(`Reserved here: ${holds.map((hold) => withMinus(hold.resource)).join(', ')}.`)
+    } catch (failure) {
+      setError(reservationFailure(failure))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <form onSubmit={reserve} noValidate className={styles.reserve} aria-label="Reserve stock here">
+      <FormAlert>{error}</FormAlert>
+      <TextField
+        id={`reserve-${need.itemId}`}
+        label="How many"
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={remaining}
+        value={count}
+        onChange={setCount}
+      />
+      <button type="submit" className={styles.secondaryAction} disabled={pending} aria-busy={pending}>
+        {pending ? 'Reserving…' : valid ? `Reserve ${asked} here` : 'Reserve here'}
+      </button>
+    </form>
+  )
+}
+
+/**
+ * The stock held for this case (story #43): what each hold is, until when it is held and at which hospital, with a
+ * release for each one still held. Staff who can't edit see the list without the buttons. The words, not colour, say
+ * what each hold is.
+ */
+function Reservations({
+  reference,
+  holds,
+  canRelease,
+  notice,
+  onChanged,
+}: {
+  reference: string
+  holds: CaseReservation[]
+  canRelease: boolean
+  notice: string
+  onChanged: (message: string) => void
+}) {
+  const [releasing, setReleasing] = useState<number>()
+  const [error, setError] = useState<string>()
+
+  async function release(hold: CaseReservation) {
+    setError(undefined)
+    setReleasing(hold.id)
+    try {
+      const released = await releaseReservation(reference, hold.id)
+      onChanged(`Released ${withMinus(released.resource)}.`)
+    } catch (failure) {
+      setError(reservationFailure(failure))
+    } finally {
+      setReleasing(undefined)
+    }
+  }
+
+  return (
+    <Panel title="Reservations" id="reservations">
+      <FormAlert>{error}</FormAlert>
+      <p role="status" className="visually-hidden">
+        {notice}
+      </p>
+      {holds.length === 0 ? (
+        <p>Nothing is held for this case.</p>
+      ) : (
+        <ul className={styles.candidates}>
+          {holds.map((hold) => (
+            <li key={hold.id} className={styles.candidate}>
+              <div className={styles.candidateTop}>
+                <strong>{withMinus(hold.resource)}</strong>
+                <span className={styles.badge}>{hold.status === 'held' ? 'Held' : 'Allocated'}</span>
+              </div>
+              <div>
+                {hold.status === 'held' ? (
+                  <span>
+                    Holds until <time dateTime={hold.expiresAt}>{formatClock(new Date(hold.expiresAt))}</time>
+                  </span>
+                ) : (
+                  <span>Confirmed for this case</span>
+                )}{' '}
+                · <span>{hold.hospital.name}</span> · <span>reserved by {hold.reservedBy}</span>
+              </div>
+              {canRelease && hold.status === 'held' && (
+                <div className={styles.moves}>
+                  <button
+                    type="button"
+                    className={styles.secondaryAction}
+                    disabled={releasing !== undefined}
+                    aria-busy={releasing === hold.id}
+                    aria-label={`Release ${withMinus(hold.resource)}`}
+                    onClick={() => release(hold)}
+                  >
+                    {releasing === hold.id ? 'Releasing…' : 'Release'}
+                  </button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  )
+}
+
+/** Why a hold or a release didn't happen: the server's words for a 400 or 409, or a plain failure. */
+function reservationFailure(error: unknown): string {
+  if (error instanceof ApiError && error.status !== 0 && error.status < 500) {
+    const detail = typeof error.body === 'object' && error.body !== null ? (error.body as { detail?: unknown }).detail : undefined
+    return typeof detail === 'string' ? detail : 'Nothing changed. Check the details and try again.'
+  }
+  return 'The hospital’s system didn’t respond, so nothing changed. Try again.'
 }
 
 /**

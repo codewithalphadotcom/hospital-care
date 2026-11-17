@@ -441,3 +441,64 @@ describe('EmergencyCasePage: the best single destination across the short needs 
     expect(screen.queryByRole('heading', { name: 'Best single destination' })).toBeNull()
   })
 })
+
+describe('EmergencyCasePage stock holds (story #43)', () => {
+  const holds = async () => screen.findByRole('region', { name: 'Reservations' })
+  /** The first need of the case: "4 × O− red cells", 1 free here, nothing held yet. */
+  const firstNeed = async () => within(await details()).getAllByRole('listitem')[0]!
+  const postsTo = (fetchMock: ReturnType<typeof mockStaffApi>['fetchMock'], path: string) =>
+    fetchMock.mock.calls.filter(([url, init]) => String(url).includes(path) && init?.method === 'POST')
+
+  it('holds what is free here for a need, shows the hold with the time it lasts until, and updates the figures', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const need = await firstNeed()
+    expect(within(need).getByLabelText('How many')).toHaveValue(1)
+    await userEvent.click(within(need).getByRole('button', { name: 'Reserve 1 here' }))
+
+    const panel = await holds()
+    expect(await within(panel).findByText('O− red cells DN-0001')).toBeInTheDocument()
+    expect(within(panel).getByText('Held')).toBeInTheDocument()
+    expect(within(panel).getByText(/Holds until/)).toBeInTheDocument()
+    expect(within(panel).getByText(/reserved by Dr\. Ayesha Khan/)).toBeInTheDocument()
+    expect(within(await details()).getByText('Available here: 0 · Short: 3')).toBeInTheDocument()
+    const [call] = postsTo(fetchMock, '/reservations/')
+    expect(JSON.parse(String(call![1]!.body))).toEqual({ itemId: 1, quantity: 1 })
+  })
+
+  it('won’t ask for more than the need still lacks, and says so on the page without asking the server', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const need = await firstNeed()
+    await userEvent.clear(within(need).getByLabelText('How many'))
+    await userEvent.type(within(need).getByLabelText('How many'), '5')
+    await userEvent.click(within(need).getByRole('button', { name: 'Reserve here' }))
+
+    expect(within(need).getByRole('alert')).toHaveTextContent('Enter a whole number from 1 to 4.')
+    expect(postsTo(fetchMock, '/reservations/')).toHaveLength(0)
+  })
+
+  it('releases a hold, which gives the stock back here', async () => {
+    mockStaffApi({ role: 'nurse' })
+    renderStaff(CASE)
+
+    await userEvent.click(within(await firstNeed()).getByRole('button', { name: 'Reserve 1 here' }))
+    const panel = await holds()
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Release O− red cells DN-0001' }))
+
+    expect(await within(panel).findByText('Nothing is held for this case.')).toBeInTheDocument()
+    expect(within(await details()).getByText('Available here: 1 · Short: 3')).toBeInTheDocument()
+    expect(await within(panel).findByText('Released O− red cells DN-0001.')).toBeInTheDocument()
+  })
+
+  it('shows a blood bank the holds without the reserve or release controls (view only)', async () => {
+    mockStaffApi({ role: 'bloodBank' })
+    renderStaff(CASE)
+
+    await details()
+    expect(screen.queryByRole('button', { name: /Reserve/ })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Reservations' })).toBeNull()
+  })
+})
