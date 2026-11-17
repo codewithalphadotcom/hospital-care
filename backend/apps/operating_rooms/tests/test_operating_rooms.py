@@ -135,6 +135,10 @@ def test_staff_only_see_their_own_hospitals_rooms(client_as, make_hospital):
         ("available", "outOfService", "outOfService"),
         ("maintenance", "outOfService", "outOfService"),
         ("outOfService", "returnToService", "maintenance"),
+        # Story #43: a hold on a room, and its release or use.
+        ("available", "reserve", "reserved"),
+        ("reserved", "cancelReservation", "available"),
+        ("reserved", "startCase", "inUse"),
     ],
 )
 def test_allowed_moves(client_as, start, action, end):
@@ -206,6 +210,7 @@ def test_matchable_is_only_available_rooms():
     make("OR 3", status="cleaning")
     make("OR 4", status="maintenance")
     make("OR 5", status="outOfService")
+    make("OR 6", status="reserved")
     assert list(OperatingRoom.objects.matchable().values_list("name", flat=True)) == ["OR 1"]
 
 

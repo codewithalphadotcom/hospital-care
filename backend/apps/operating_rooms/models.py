@@ -23,18 +23,23 @@ class OrStatus(models.TextChoices):
     AVAILABLE = "available", "Available"
     IN_USE = "inUse", "In use"
     CLEANING = "cleaning", "Cleaning"
+    RESERVED = "reserved", "Reserved"
     MAINTENANCE = "maintenance", "Maintenance"
     OUT_OF_SERVICE = "outOfService", "Out of service"
 
 
 S = OrStatus
 
-# Status changes go through POST /api/operating-rooms/<id>/actions/ (story #28).
+# Status changes go through POST /api/operating-rooms/<id>/actions/ (story #28). "reserve" and
+# "cancelReservation" are also what a hold made by the reservation service does (story #43).
 OR_LIFECYCLE = StateMachine(
     "room",  # for the 409 message: "Can't startCase a room that is in use."
     OrStatus,
     {
         (S.AVAILABLE, "startCase"): S.IN_USE,
+        (S.AVAILABLE, "reserve"): S.RESERVED,
+        (S.RESERVED, "cancelReservation"): S.AVAILABLE,
+        (S.RESERVED, "startCase"): S.IN_USE,
         (S.IN_USE, "finishCase"): S.CLEANING,
         (S.CLEANING, "finishCleaning"): S.AVAILABLE,
         (S.AVAILABLE, "startMaintenance"): S.MAINTENANCE,
