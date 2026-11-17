@@ -110,10 +110,52 @@ export interface CandidateItem {
   candidates: Candidate[]
 }
 
-/** The sources for a case (story #38). `items` holds only the short needs: empty when all are covered locally. */
+/** One short need a hospital cannot cover in full (story #42), with how many it is missing and how many it has. */
+export interface UnmetNeed {
+  itemId: number
+  need: string
+  /** How many more the hospital would need to cover the line. */
+  missing: number
+  /** What the hospital has for this line, after the lines before it on the same stock. 0 when it has none. */
+  available: number
+}
+
+/**
+ * A hospital judged across every short need at once (story #42). Shape of `HospitalMatchSerializer`. The list is
+ * ordered: complete hospitals first, then by the needs covered, the score, and the distance.
+ */
+export interface HospitalMatch {
+  /** 1-based position in the list. */
+  rank: number
+  hospital: { id: number; name: string }
+  /** True when the hospital covers every short need. */
+  complete: boolean
+  /** True only on rank 1, and only when the hospital is complete. */
+  recommended: boolean
+  /** "2 of 3": the needs covered, of the short needs. */
+  coverage: string
+  coveredCount: number
+  totalNeeds: number
+  /** The mean of the hospital's #41 scores over the needs it has candidates for, one decimal, out of 100. */
+  score: number
+  /** Straight-line distance, one decimal. Null when either side has no coordinates or the case has no hospital. */
+  distanceKm: number | null
+  /** Estimated travel time in whole minutes (#39). Null with `distanceKm`. */
+  travelMinutes: number | null
+  /** The needs the hospital covers in full. */
+  covered: { itemId: number; need: string }[]
+  /** The needs it does not cover in full: partial ones, and those it has none of. */
+  unmet: UnmetNeed[]
+}
+
+/**
+ * The sources for a case (story #38). `items` holds only the short needs: empty when all are covered locally.
+ * `hospitals` judges the hospitals across all of them at once (story #42): empty when nothing is short.
+ */
 export interface CandidatesResponse {
   reference: string
   items: CandidateItem[]
+  hospitals: HospitalMatch[]
 }
 
 /** A move along the lifecycle (story #34). The names match REQUEST_LIFECYCLE in backend/apps/emergencies/models.py. */

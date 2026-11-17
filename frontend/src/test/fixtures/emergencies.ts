@@ -1,4 +1,4 @@
-import type { CandidatesResponse, EmergencyCase, FeedEntry } from '../../api/emergencies'
+import type { Candidate, CandidatesResponse, EmergencyCase, FeedEntry } from '../../api/emergencies'
 
 /**
  * What CityCare General has free for each sample case's needs, in item order (story #33). EC-2026-0002 is short
@@ -169,6 +169,39 @@ export function sampleCandidates(now: Date): Record<string, CandidatesResponse> 
         },
         { itemId: 2, need: 'ICU bed', shortfall: 1, strategy: nearest, candidates: [] },
       ],
+      hospitals: [
+        {
+          rank: 1,
+          hospital: riverside,
+          complete: false,
+          recommended: false,
+          coverage: '1 of 2',
+          coveredCount: 1,
+          totalNeeds: 2,
+          score: 87.6,
+          distanceKm: 4.2,
+          travelMinutes: 6,
+          covered: [{ itemId: 1, need: 'O- red cells' }],
+          unmet: [{ itemId: 2, need: 'ICU bed', missing: 1, available: 0 }],
+        },
+        {
+          rank: 2,
+          hospital: northside,
+          complete: false,
+          recommended: false,
+          coverage: '0 of 2',
+          coveredCount: 0,
+          totalNeeds: 2,
+          score: 69.7,
+          distanceKm: null,
+          travelMinutes: null,
+          covered: [],
+          unmet: [
+            { itemId: 1, need: 'O- red cells', missing: 2, available: 1 },
+            { itemId: 2, need: 'ICU bed', missing: 1, available: 0 },
+          ],
+        },
+      ],
     },
     'EC-2026-0003': {
       reference: 'EC-2026-0003',
@@ -200,7 +233,127 @@ export function sampleCandidates(now: Date): Record<string, CandidatesResponse> 
         },
         { itemId: 4, need: 'Cardiac operating room', shortfall: 1, strategy: nearest, candidates: [] },
       ],
+      hospitals: [
+        {
+          rank: 1,
+          hospital: riverside,
+          complete: false,
+          recommended: false,
+          coverage: '1 of 2',
+          coveredCount: 1,
+          totalNeeds: 2,
+          score: 94.1,
+          distanceKm: 4.2,
+          travelMinutes: 6,
+          covered: [{ itemId: 3, need: 'Ventilator' }],
+          unmet: [{ itemId: 4, need: 'Cardiac operating room', missing: 1, available: 0 }],
+        },
+      ],
     },
-    'EC-2026-0001': { reference: 'EC-2026-0001', items: [] },
+    'EC-2026-0001': { reference: 'EC-2026-0001', items: [], hospitals: [] },
+  }
+}
+
+/**
+ * Three short needs at once (story #42): an ICU bed, two ventilators and two O− red cells. The first hospital has all
+ * of them, so it is complete and recommended. The second has the bed and one unit of blood. The third has one
+ * ventilator. The server lists them in that order, which is not alphabetical, so a screen that re-sorted would show it.
+ * The per-need lists carry the same stock.
+ */
+export function sampleThreeNeedSources(): CandidatesResponse {
+  const full = { id: 2, name: 'Riverside Medical Centre' }
+  const partial = { id: 3, name: "Northside Children's Hospital" }
+  const sea = { id: 4, name: 'Seaview Hospital' }
+  const nearest = { name: 'nearest', label: 'Nearest first' }
+  const offer = (hospital: { id: number; name: string }, available: number, shortfall: number, rank: number, total: number): Candidate => ({
+    hospital,
+    available,
+    covers: available >= shortfall,
+    distanceKm: hospital === full ? 4.2 : null,
+    travelMinutes: hospital === full ? 6 : null,
+    rank,
+    recommended: rank === 1 && total > 0,
+    score: { total, strategy: 'nearest', factors: [] },
+  })
+  return {
+    reference: 'EC-2026-0002',
+    items: [
+      {
+        itemId: 1,
+        need: 'ICU bed',
+        shortfall: 1,
+        strategy: nearest,
+        candidates: [offer(full, 1, 1, 1, 92), offer(partial, 1, 1, 2, 60)],
+      },
+      {
+        itemId: 2,
+        need: 'Ventilator',
+        shortfall: 2,
+        strategy: nearest,
+        candidates: [offer(full, 2, 2, 1, 94), offer(sea, 1, 2, 2, 30)],
+      },
+      {
+        itemId: 3,
+        need: 'O- red cells',
+        shortfall: 2,
+        strategy: nearest,
+        candidates: [offer(full, 5, 2, 1, 80), offer(partial, 1, 2, 2, 40)],
+      },
+    ],
+    hospitals: [
+      {
+        rank: 1,
+        hospital: full,
+        complete: true,
+        recommended: true,
+        coverage: '3 of 3',
+        coveredCount: 3,
+        totalNeeds: 3,
+        score: 88.7,
+        distanceKm: 4.2,
+        travelMinutes: 6,
+        covered: [
+          { itemId: 1, need: 'ICU bed' },
+          { itemId: 2, need: 'Ventilator' },
+          { itemId: 3, need: 'O- red cells' },
+        ],
+        unmet: [],
+      },
+      {
+        rank: 2,
+        hospital: partial,
+        complete: false,
+        recommended: false,
+        coverage: '1 of 3',
+        coveredCount: 1,
+        totalNeeds: 3,
+        score: 50,
+        distanceKm: null,
+        travelMinutes: null,
+        covered: [{ itemId: 1, need: 'ICU bed' }],
+        unmet: [
+          { itemId: 2, need: 'Ventilator', missing: 2, available: 0 },
+          { itemId: 3, need: 'O- red cells', missing: 1, available: 1 },
+        ],
+      },
+      {
+        rank: 3,
+        hospital: sea,
+        complete: false,
+        recommended: false,
+        coverage: '0 of 3',
+        coveredCount: 0,
+        totalNeeds: 3,
+        score: 30,
+        distanceKm: null,
+        travelMinutes: null,
+        covered: [],
+        unmet: [
+          { itemId: 1, need: 'ICU bed', missing: 1, available: 0 },
+          { itemId: 2, need: 'Ventilator', missing: 1, available: 1 },
+          { itemId: 3, need: 'O- red cells', missing: 2, available: 0 },
+        ],
+      },
+    ],
   }
 }

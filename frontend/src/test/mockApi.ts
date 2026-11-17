@@ -359,7 +359,7 @@ export function mockStaffApi({
     'GET /emergencies/:reference/candidates/': view('emergencies', ({ params }) => {
       if (!findCase(params.reference)) return fail(404)
       if (customCandidates) return ok({ ...customCandidates, reference: params.reference })
-      return ok(sampleCandidates(now)[params.reference] ?? { reference: params.reference, items: [] })
+      return ok(sampleCandidates(now)[params.reference] ?? { reference: params.reference, items: [], hospitals: [] })
     }),
     'POST /emergencies/:reference/actions/': edit('emergencies', ({ params, body }) => {
       const found = findCase(params.reference)
