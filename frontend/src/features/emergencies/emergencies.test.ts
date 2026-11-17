@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '../../api/client'
+import type { CaseAllocation, HeldReservation, StatusChange } from '../../api/emergencies'
 import {
   actionsFor,
   describeMove,
+  groupHeld,
   describeNeed,
   emptyCase,
   newNeed,
@@ -10,6 +12,7 @@ import {
   serverErrors,
   shortfallSummary,
   stepWithErrors,
+  timelineOf,
   toCaseInput,
   validateCaseStep,
   validateNeedsStep,
@@ -147,5 +150,72 @@ describe('local availability summary (#33)', () => {
     expect(shortfallSummary(0)).toBe('Everything is available here')
     expect(shortfallSummary(1)).toBe('1 unit or bed needed from other hospitals')
     expect(shortfallSummary(4)).toBe('4 units/beds needed from other hospitals')
+  })
+})
+
+describe('timelineOf (story #45)', () => {
+  const move = (at: string, action: 'startMatching' | 'fulfil', note = ''): StatusChange => ({
+    fromStatus: action === 'fulfil' ? 'matching' : 'open',
+    toStatus: action === 'fulfil' ? 'fulfilled' : 'matching',
+    action,
+    note,
+    actor: null,
+    at,
+  })
+  const allocation = (id: number, at: string): CaseAllocation => ({
+    id,
+    itemId: 1,
+    resource: 'O− red cells DN-0042',
+    hospital: { id: 1, name: 'City Hospital' },
+    allocatedBy: 'Ayesha Khan',
+    at,
+    note: '',
+  })
+
+  it('merges allocations into the status moves, oldest first', () => {
+    const entries = timelineOf(
+      [move('2026-11-17T09:00:00+05:00', 'startMatching'), move('2026-11-17T11:00:00+05:00', 'fulfil')],
+      [allocation(7, '2026-11-17T10:00:00+05:00')],
+    )
+    expect(entries.map((e) => (e.kind === 'move' ? e.change.action : `allocated ${e.allocation.id}`))).toEqual([
+      'startMatching',
+      'allocated 7',
+      'fulfil',
+    ])
+  })
+
+  it('shows an allocation before the move it caused at the same moment', () => {
+    const at = '2026-11-17T10:00:00+05:00'
+    const entries = timelineOf([move(at, 'fulfil')], [allocation(7, at)])
+    expect(entries.map((e) => e.kind)).toEqual(['allocation', 'move'])
+  })
+
+  it('compares the real times, not the text, when offsets differ', () => {
+    // 10:30+05:00 is 05:30Z, before 06:00Z, though its text sorts after "06:00".
+    const entries = timelineOf([move('2026-11-17T10:30:00+05:00', 'fulfil')], [allocation(7, '2026-11-17T06:00:00Z')])
+    expect(entries.map((e) => e.kind)).toEqual(['move', 'allocation'])
+  })
+})
+
+describe('groupHeld (story #46)', () => {
+  const hold = (id: number, reference: string, itemId: number): HeldReservation => ({
+    id,
+    type: 'blood',
+    status: 'held',
+    case: { reference, severity: 'critical', status: 'matching' },
+    need: { itemId, label: 'O- red cells', quantity: 4, fulfilled: 0, remaining: 4 },
+    resource: `O- red cells DN-000${id}`,
+    expiresAt: '2026-11-17T10:00:00Z',
+    reservedBy: 'Hina Javed',
+    canAllocate: true,
+  })
+
+  it('groups by case, then by need, keeping the server’s order', () => {
+    const groups = groupHeld([hold(1, 'EC-1', 1), hold(2, 'EC-2', 5), hold(3, 'EC-1', 2), hold(4, 'EC-1', 1)])
+    expect(groups.map((g) => g.case.reference)).toEqual(['EC-1', 'EC-2'])
+    expect(groups[0]!.needs.map((n) => [n.need.itemId, n.holds.map((h) => h.id)])).toEqual([
+      [1, [1, 4]],
+      [2, [3]],
+    ])
   })
 })

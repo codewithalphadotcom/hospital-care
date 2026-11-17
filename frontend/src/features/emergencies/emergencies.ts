@@ -8,7 +8,9 @@ import {
   MAX_PATIENT_REF,
   MAX_QUANTITY,
   type CaseAction,
+  type CaseAllocation,
   type CaseInput,
+  type HeldReservation,
   type CaseStatus,
   type Need,
   type Severity,
@@ -109,6 +111,43 @@ export function nextStatus(status: CaseStatus, action: CaseAction): CaseStatus |
 /** "Matching → Partially fulfilled", or "Case opened" for the first entry of a timeline. */
 export function describeMove(change: StatusChange): string {
   return change.fromStatus ? `${STATUS_LABEL[change.fromStatus]} → ${STATUS_LABEL[change.toStatus]}` : 'Case opened'
+}
+
+/** The server's blood group code, with the minus sign the pages use: "O- red cells" → "O− red cells". */
+export const withMinus = (label: string) => label.replace(/^(AB|A|B|O)-/, '$1−')
+
+/** One need of a case with the held reservations for it (story #46). */
+export type HeldNeedGroup = { need: HeldReservation['need']; holds: HeldReservation[] }
+/** One case with the needs that have holds, in the order the server sends (most urgent case first). */
+export type HeldCaseGroup = { case: HeldReservation['case']; needs: HeldNeedGroup[] }
+
+/** Groups held reservations by case, then by need, keeping the server's order. */
+export function groupHeld(holds: HeldReservation[]): HeldCaseGroup[] {
+  const cases = new Map<string, HeldCaseGroup>()
+  for (const hold of holds) {
+    const group = cases.get(hold.case.reference) ?? { case: hold.case, needs: [] }
+    cases.set(hold.case.reference, group)
+    let need = group.needs.find((n) => n.need.itemId === hold.need.itemId)
+    if (!need) group.needs.push((need = { need: hold.need, holds: [] }))
+    need.holds.push(hold)
+  }
+  return [...cases.values()]
+}
+
+/** One row of a case's timeline: a status move, or a resource handed over to the case (story #45). */
+export type TimelineEntry = { kind: 'move'; at: string; change: StatusChange } | { kind: 'allocation'; at: string; allocation: CaseAllocation }
+
+/**
+ * The status moves and the allocations of a case as one timeline, oldest first. The sort is stable and the allocations
+ * come first, so an allocation shows before the status move it caused at the same moment. Compares real times, since
+ * the server's timestamps vary in offset.
+ */
+export function timelineOf(history: StatusChange[], allocations: CaseAllocation[]): TimelineEntry[] {
+  const entries: TimelineEntry[] = [
+    ...allocations.map((allocation): TimelineEntry => ({ kind: 'allocation', at: allocation.at, allocation })),
+    ...history.map((change): TimelineEntry => ({ kind: 'move', at: change.at, change })),
+  ]
+  return entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
 }
 
 /** One row of the "What's needed" step. `quantity` is the raw input text; `key` stays stable as rows come and go. */

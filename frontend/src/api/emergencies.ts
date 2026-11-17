@@ -52,6 +52,7 @@ export interface FeedEntry {
 }
 
 export type FeedType = 'blood' | 'bed'
+export type ResourceType = 'blood' | 'bed' | 'equipment' | 'operatingRoom'
 
 /** A hospital that can supply one requirement (story #38). Shape of `CandidateSerializer`. */
 export interface Candidate {
@@ -174,10 +175,18 @@ export interface StatusChange {
 }
 
 /**
- * What the case's own hospital has for one need (story #33), and the resources held for it (story #43). Only the
- * detail carries it. `reserved` counts the holds not yet allocated.
+ * What the case's own hospital has for one need (story #33), the resources held for it (story #43) and what has been
+ * allocated to it (story #45). Only the detail carries it. `reserved` counts the holds not yet allocated. `fulfilled`
+ * is what has been allocated; `remaining` is the quantity less that.
  */
-export type NeedAvailability = { itemId: number; localAvailable: number; shortfall: number; reserved: number }
+export type NeedAvailability = {
+  itemId: number
+  localAvailable: number
+  shortfall: number
+  reserved: number
+  fulfilled: number
+  remaining: number
+}
 export type AvailableNeed = Need & NeedAvailability
 
 /** A hold on one resource for one need of a case (story #43). Shape of `ReservationSerializer`. */
@@ -188,11 +197,45 @@ export interface CaseReservation {
   /** As staff name it: "O− red cells DN-0042", "Bed ICU-03", "Ventilator VENT-003" or "OR 1". */
   resource: string
   hospital: { id: number; name: string }
-  /** Held until the hold expires or is released; allocated once the resource is confirmed (story #45). */
+  /** Held until the hold expires or is released; allocated once the resource is handed over (story #45). */
   status: 'held' | 'allocated' | 'released' | 'expired'
   expiresAt: string
   /** The person who made the hold, or their email if they have no name. */
   reservedBy: string
+  /** True when the signed-in user may allocate this hold now: it is held, and the user's role and hospital allow it. */
+  canAllocate: boolean
+}
+
+/**
+ * The record that a held resource was handed over to a case (story #45). Shape of `AllocationSerializer`. Permanent:
+ * nothing changes or removes one.
+ */
+export interface CaseAllocation {
+  id: number
+  /** The need it was allocated for: an `itemId` of the case's items. */
+  itemId: number
+  resource: string
+  hospital: { id: number; name: string }
+  /** The person who allocated it, or their email if they have no name. */
+  allocatedBy: string
+  at: string
+  note: string
+}
+
+/**
+ * A held reservation at the user's hospital, for the Blood page's "Reserved for cases" panel (story #46). Shape of
+ * `HeldReservationSerializer`. Ordered most urgent case first, then the hold expiring first.
+ */
+export interface HeldReservation {
+  id: number
+  type: ResourceType
+  status: 'held'
+  case: { reference: string; severity: Severity; status: CaseStatus }
+  need: { itemId: number; label: string; quantity: number; fulfilled: number; remaining: number }
+  resource: string
+  expiresAt: string
+  reservedBy: string
+  canAllocate: boolean
 }
 
 /**
@@ -209,6 +252,8 @@ export interface EmergencyCaseDetail extends EmergencyCase {
   outcome: string | null
   /** The holds still in force on the case's stock: held and allocated (story #43). */
   reservations: CaseReservation[]
+  /** The resources handed over to the case, oldest first (story #45). */
+  allocations: CaseAllocation[]
 }
 
 export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[] = [
@@ -269,4 +314,25 @@ export function reserveStock(reference: string, itemId: number, quantity: number
 /** Release a held reservation. POST /api/emergencies/<reference>/reservations/<id>/release/ (emergencies: edit). 409 if it isn't held. */
 export function releaseReservation(reference: string, id: number): Promise<CaseReservation> {
   return apiPost<CaseReservation>(`/emergencies/${encodeURIComponent(reference)}/reservations/${id}/release/`, {})
+}
+
+/**
+ * Held reservations at the user's hospital (every hospital for admins), for the types the role can see, most urgent
+ * first. GET /api/reservations/?status=held&type=blood. 403 when the role can't see the type.
+ */
+export function getHeldReservations(type?: ResourceType): Promise<HeldReservation[]> {
+  return apiGet<HeldReservation[]>(`/reservations/?status=held${type ? `&type=${type}` : ''}`)
+}
+
+/** Allocate one held reservation to its case (story #46). POST /api/reservations/<id>/allocate/. 409 if it can't be. */
+export function allocateReservation(id: number, note = ''): Promise<CaseAllocation> {
+  return apiPost<CaseAllocation>(`/reservations/${id}/allocate/`, { note })
+}
+
+/**
+ * Allocate several held reservations together: all of them, or none (story #46). POST /api/reservations/allocate/.
+ * 409 when one of them can't be allocated, and nothing changes.
+ */
+export function allocateReservations(ids: number[]): Promise<CaseAllocation[]> {
+  return apiPost<CaseAllocation[]>('/reservations/allocate/', { ids })
 }
