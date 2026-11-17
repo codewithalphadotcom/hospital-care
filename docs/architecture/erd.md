@@ -273,7 +273,7 @@ Two differences from the proposal's entity list to settle in refinement:
 |---|---|---|---|
 | Donor, Donation, TestResult | blood | 3 | #17–#21 |
 | Equipment, OperatingRoom, RoomBooking (Equipment inherits Resource) | resources | 4 | #26–#29 |
-| EmergencyRequest, RequestItem | emergencies | 5 | #30–#36 |
+| EmergencyRequest, RequestItem (built in Sprint 7 with #30/#32; no `escalate_after` or `outcome_note` until #35) | emergencies | 5 | #30–#36 |
 | Reservation, Allocation | matching | 6–7 | #38–#45 |
 | TransferRequest, TransferItem, Ambulance, Trip | transfers | 7–8 | #47–#51 |
 | Notification | notifications | 8 | #52–#53 |

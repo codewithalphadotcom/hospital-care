@@ -1,11 +1,20 @@
+from django.shortcuts import get_object_or_404
+from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.permissions import module_permission, own_hospital
 from apps.hospitals.models import DoctorShift
 from apps.hospitals.serializers import DoctorSerializer
 
-from .models import EmergencyStatus
+from .models import EmergencyRequest, EmergencyStatus
+from .serializers import CaseInputSerializer, CaseSerializer
+from .services import create_case
+
+
+def case_queryset():
+    return EmergencyRequest.objects.select_related("hospital", "created_by").prefetch_related("items")
 
 
 class PublicStatusView(APIView):
@@ -28,3 +37,33 @@ class PublicStatusView(APIView):
                 "doctors": DoctorSerializer(doctors, many=True).data,
             }
         )
+
+
+class CaseListView(APIView):
+    """GET /api/emergencies/ → the user's hospital's cases, newest first (every case for staff without one).
+    POST opens a case with its needs (stories #30, #32; emergencies: edit)."""
+
+    permission_classes = [module_permission("emergencies")]
+
+    def get(self, request):
+        cases = own_hospital(case_queryset(), request.user)
+        return Response(CaseSerializer(cases, many=True).data)
+
+    def post(self, request):
+        serializer = CaseInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        case = create_case(
+            severity=data["severity"], patient_ref=data["patientRef"], items=data["items"], actor=request.user
+        )
+        return Response(CaseSerializer(case_queryset().get(pk=case.pk)).data, status=status.HTTP_201_CREATED)
+
+
+class CaseDetailView(APIView):
+    """GET /api/emergencies/<reference>/. Another hospital's case is 404, as if it didn't exist."""
+
+    permission_classes = [module_permission("emergencies")]
+
+    def get(self, request, reference):
+        case = get_object_or_404(own_hospital(case_queryset(), request.user), reference=reference)
+        return Response(CaseSerializer(case).data)

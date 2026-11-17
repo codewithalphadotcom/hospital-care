@@ -12,16 +12,24 @@ VIEW, EDIT = "view", "edit"
 ACCESS: dict[str, dict[str, str]] = {
     Role.ADMIN: {
         "overview": VIEW,
+        "emergencies": EDIT,
         "beds": EDIT,
         "blood": EDIT,
         "pharmacy": EDIT,
         "hospitals": EDIT,
         "users": EDIT,
     },
-    Role.DOCTOR: {"overview": VIEW, "beds": VIEW, "blood": VIEW, "pharmacy": VIEW, "hospitals": VIEW},
-    Role.NURSE: {"overview": VIEW, "beds": EDIT, "pharmacy": VIEW, "hospitals": VIEW},
-    Role.BLOOD_BANK: {"overview": VIEW, "blood": EDIT, "hospitals": VIEW},
-    Role.PHARMACIST: {"overview": VIEW, "pharmacy": EDIT, "hospitals": VIEW},
+    Role.DOCTOR: {
+        "overview": VIEW,
+        "emergencies": EDIT,
+        "beds": VIEW,
+        "blood": VIEW,
+        "pharmacy": VIEW,
+        "hospitals": VIEW,
+    },
+    Role.NURSE: {"overview": VIEW, "emergencies": EDIT, "beds": EDIT, "pharmacy": VIEW, "hospitals": VIEW},
+    Role.BLOOD_BANK: {"overview": VIEW, "emergencies": VIEW, "blood": EDIT, "hospitals": VIEW},
+    Role.PHARMACIST: {"overview": VIEW, "emergencies": VIEW, "pharmacy": EDIT, "hospitals": VIEW},
     Role.PATIENT: {},
 }
 
@@ -51,6 +59,12 @@ def module_permission(module: str) -> type[BasePermission]:
 
     ModuleAccess.__name__ = f"{module.title()}ModuleAccess"
     return ModuleAccess
+
+
+def own_hospital(queryset, user):
+    """Users who work at a hospital see only its rows; staff without one (admins) see the whole network.
+    Always a fresh queryset: handing back a shared one (e.g. a module-level constant) would cache its rows."""
+    return queryset.filter(hospital_id=user.hospital_id) if user.hospital_id else queryset.all()
 
 
 def may_change(user, resource) -> bool:

@@ -106,6 +106,39 @@ Appointment = { id: number, donorId: string, donorName: string, startsAt: string
 
 All four `BLOOD_*` settings can be changed with environment variables of the same name.
 
+## Emergency cases (#30, #32)
+
+Module `emergencies`: admin, doctor and nurse can open cases; blood bank and pharmacist can view them. Users
+at a hospital see only its cases (another hospital's case → **404**); staff with no hospital see every case.
+
+| Method | Path | Body | Success | Story |
+|---|---|---|---|---|
+| GET | `/emergencies/` | – | `EmergencyCase[]`, newest first | #30 |
+| POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #32 |
+| GET | `/emergencies/<id>/` | – | `EmergencyCase` | #30 |
+
+```ts
+EmergencyCase = {
+  id: string,                   // "EC-2026-0001": sequential per year
+  severity: 'critical' | 'urgent' | 'routine',
+  status: 'open' | 'matching' | 'partiallyFulfilled' | 'fulfilled' | 'escalated' | 'closed' | 'cancelled',
+  patientRef: string,           // optional bed/triage tag, ≤ 30 chars; never a name
+  hospital: { id: number, name: string } | null,
+  createdBy: string, createdAt: string,
+  items: RequestItem[]          // 1–10
+}
+RequestItem = { type: 'blood', group: BloodGroup, component: Component, quantity: number }  // 1–20
+            | { type: 'bed', bedType: 'icu' | 'emergency' | 'general' | 'isolation' | 'nicu', quantity: number }  // 1–5
+```
+
+**Rules**
+
+- A new case is always `open`, at the creator's hospital, and audit-logged (`emergencyrequest.created`).
+  Moving between statuses arrives with #34.
+- No patient-identifying data is collected: `patientRef` is optional.
+- Errors on one need come back keyed by its position: `{"items": {"0": {"quantity": ["..."]}}}`. An empty or
+  over-long list is `{"items": ["..."]}`.
+
 ## Demo data
 
 ```bash
