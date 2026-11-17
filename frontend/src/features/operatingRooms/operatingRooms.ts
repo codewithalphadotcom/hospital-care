@@ -3,6 +3,7 @@ import type { Tone } from '../../components/ui/StatusBadge'
 
 export const ROOM_TONE: Record<OrStatus, Tone> = {
   available: 'ok',
+  reserved: 'neutral',
   inUse: 'neutral',
   cleaning: 'neutral',
   maintenance: 'warning',
@@ -15,8 +16,13 @@ type Transition = { action: OperatingRoomAction; label: string; next: OrStatus }
 const TRANSITIONS: Record<OrStatus, readonly Transition[]> = {
   available: [
     { action: 'startCase', label: 'Start case', next: 'inUse' },
+    { action: 'reserve', label: 'Reserve', next: 'reserved' },
     { action: 'startMaintenance', label: 'Start maintenance', next: 'maintenance' },
     { action: 'outOfService', label: 'Take out of service', next: 'outOfService' },
+  ],
+  reserved: [
+    { action: 'startCase', label: 'Start case', next: 'inUse' },
+    { action: 'cancelReservation', label: 'Cancel reservation', next: 'available' },
   ],
   inUse: [{ action: 'finishCase', label: 'Finish case', next: 'cleaning' }],
   cleaning: [

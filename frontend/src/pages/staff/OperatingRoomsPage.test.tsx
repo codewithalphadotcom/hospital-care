@@ -112,4 +112,16 @@ describe('OperatingRoomsPage (story #28 Operating room registry)', () => {
     expect(screen.getByRole('button', { name: 'Start maintenance Trauma theatre' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Start case Trauma theatre' })).not.toBeInTheDocument()
   })
+
+  it('holds a room for a case, then starts the case from the hold (story #43)', async () => {
+    mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/operating-rooms')
+    await table()
+    await userEvent.click(screen.getByRole('button', { name: 'Reserve OR 1' }))
+    expect(await screen.findByText('OR 1 is now reserved')).toBeInTheDocument()
+    const row = screen.getByRole('rowheader', { name: 'OR 1' }).closest('tr') as HTMLElement
+    expect(within(row).getByText('Reserved')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Start case OR 1' })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Cancel reservation OR 1' })).toBeInTheDocument()
+  })
 })

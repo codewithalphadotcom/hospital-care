@@ -4,7 +4,7 @@ import { apiGet, apiPost } from './client'
 export const HOSPITAL_UTC_OFFSET = '+05:00'
 
 export type OrCapability = 'general' | 'cardiac' | 'trauma' | 'neuro' | 'orthopedic' | 'obstetric' | 'pediatric'
-export type OrStatus = 'available' | 'inUse' | 'cleaning' | 'maintenance' | 'outOfService'
+export type OrStatus = 'available' | 'reserved' | 'inUse' | 'cleaning' | 'maintenance' | 'outOfService'
 
 export const OR_CAPABILITIES: readonly { value: OrCapability; label: string }[] = [
   { value: 'general', label: 'General' },
@@ -18,6 +18,7 @@ export const OR_CAPABILITIES: readonly { value: OrCapability; label: string }[] 
 
 export const OR_STATUSES: readonly { value: OrStatus; label: string }[] = [
   { value: 'available', label: 'Available' },
+  { value: 'reserved', label: 'Reserved' },
   { value: 'inUse', label: 'In use' },
   { value: 'cleaning', label: 'Cleaning' },
   { value: 'maintenance', label: 'Maintenance' },
@@ -55,6 +56,8 @@ export function createOperatingRoom(input: OperatingRoomInput): Promise<Operatin
 
 export type OperatingRoomAction =
   | 'startCase'
+  | 'reserve'
+  | 'cancelReservation'
   | 'finishCase'
   | 'finishCleaning'
   | 'startMaintenance'
