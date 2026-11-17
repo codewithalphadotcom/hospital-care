@@ -16,6 +16,7 @@ class EquipmentType(models.TextChoices):
 
 class EquipmentStatus(models.TextChoices):
     AVAILABLE = "available", "Available"
+    RESERVED = "reserved", "Reserved"
     IN_USE = "inUse", "In use"
     MAINTENANCE = "maintenance", "Maintenance"
     OUT_OF_SERVICE = "outOfService", "Out of service"
@@ -23,12 +24,16 @@ class EquipmentStatus(models.TextChoices):
 
 S = EquipmentStatus
 
-# Status changes go through POST /api/equipment/<id>/actions/ (story #27).
+# Status changes go through POST /api/equipment/<id>/actions/ (story #27). "reserve" and "cancelReservation"
+# are also what a hold made by the reservation service does (story #43).
 EQUIPMENT_LIFECYCLE = StateMachine(
     "piece of equipment",  # for the 409 message: "Can't use a piece of equipment that is in use."
     EquipmentStatus,
     {
         (S.AVAILABLE, "use"): S.IN_USE,
+        (S.AVAILABLE, "reserve"): S.RESERVED,
+        (S.RESERVED, "cancelReservation"): S.AVAILABLE,
+        (S.RESERVED, "use"): S.IN_USE,
         (S.IN_USE, "release"): S.AVAILABLE,
         (S.AVAILABLE, "startMaintenance"): S.MAINTENANCE,
         (S.IN_USE, "startMaintenance"): S.MAINTENANCE,

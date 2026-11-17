@@ -107,6 +107,10 @@ def act(client, pk, action, **extra):
         ("available", "outOfService", "outOfService"),
         ("maintenance", "outOfService", "outOfService"),
         ("outOfService", "returnToService", "maintenance"),
+        # Story #43: a hold on equipment, and its release or use.
+        ("available", "reserve", "reserved"),
+        ("reserved", "cancelReservation", "available"),
+        ("reserved", "use", "inUse"),
     ],
 )
 def test_allowed_moves(client_as, start, action, end):
@@ -174,4 +178,5 @@ def test_matchable_is_only_available_equipment():
     make("VENT-002", status="inUse")
     make("VENT-003", status="maintenance")
     make("VENT-004", status="outOfService")
+    make("VENT-005", status="reserved")
     assert list(Equipment.objects.matchable().values_list("identifier", flat=True)) == ["VENT-001"]
