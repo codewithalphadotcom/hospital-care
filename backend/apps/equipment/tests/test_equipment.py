@@ -159,6 +159,16 @@ def test_other_hospitals_equipment_is_not_found(client_as, make_hospital):
     assert item.status == "available"
 
 
+def test_staff_without_a_hospital_cannot_change_a_hospitals_equipment(client_as, make_hospital):
+    item = make("VENT-001", hospital=make_hospital("City"))
+    assert act(client_as(Role.NURSE), item.pk, "use").status_code == 404
+
+
+def test_admin_can_change_any_hospitals_equipment(client_as, make_hospital):
+    item = make("VENT-001", hospital=make_hospital("City"))
+    assert act(client_as(Role.ADMIN, hospital=make_hospital("Seaview")), item.pk, "use").status_code == 200
+
+
 def test_matchable_is_only_available_equipment():
     make("VENT-001", status="available")
     make("VENT-002", status="inUse")
