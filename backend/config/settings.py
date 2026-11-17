@@ -6,6 +6,8 @@ from pathlib import Path
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 
+from apps.matching.scoring import parse_scoring_config
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -145,3 +147,9 @@ BLOOD_APPOINTMENT_SLOT_MINUTES = int(os.environ.get("BLOOD_APPOINTMENT_SLOT_MINU
 
 # A critical case still unfulfilled after this many minutes in its current status is escalated (story #35).
 EMERGENCY_ESCALATION_MINUTES = positive_int_env("EMERGENCY_ESCALATION_MINUTES", 30)
+
+# Candidate scoring (story #40). MATCHING_SCORING is JSON per resource type: the strategy and the factor
+# weights, merged over the defaults in apps/matching/scoring.py. A bad value stops the server at startup.
+MATCHING_SCORING = parse_scoring_config(os.environ.get("MATCHING_SCORING", ""))
+# The distance at which the distance factor reaches 0.
+MATCHING_MAX_DISTANCE_KM = positive_int_env("MATCHING_MAX_DISTANCE_KM", 50)
