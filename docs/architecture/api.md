@@ -576,6 +576,49 @@ CaseReservation = {
   `reservation.expired`, and `<model>.status_changed` for each resource move.
 - **Detail:** `reservations` lists the held and allocated holds of the case. Each item's `reserved` counts its held ones.
 
+## Allocations (#45, #46)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/reservations/?status=held&type=blood` | – | 200 `HeldReservation[]`: held holds at your hospital (every hospital for admins) |
+| POST | `/reservations/<id>/allocate/` | `{note?}` (≤ 500) | 201 `Allocation` |
+| POST | `/reservations/allocate/` | `{ids: number[]}` (1–50) | 201 `Allocation[]`, all or nothing |
+
+```ts
+HeldReservation = {
+  id, type: 'blood' | 'bed' | 'equipment' | 'operatingRoom',
+  case: {reference, severity, status},
+  need: {itemId, label, quantity, fulfilled, remaining},
+  resource: string,             // e.g. "O- red cells DN-0042"
+  expiresAt, reservedBy,
+  canAllocate: boolean          // whether you may allocate this one
+}
+Allocation = {id, itemId, resource, hospital: {id, name}, allocatedBy, at, note}
+```
+
+- **One transaction.** Allocating locks the case, the need, the hold and the resource (the same order as reserving),
+  then does all of these or none:
+  - moves the resource to its final state: blood `issue`d, bed `admit`ted (no patient recorded), equipment `use`d,
+    room `startCase`
+  - marks the hold `allocated`
+  - adds 1 to the need's `fulfilled`
+  - writes a permanent `Allocation`
+  - moves the case as a system move: to `partiallyFulfilled` after the first allocation, to `fulfilled` once every
+    need is complete. An `open` case goes through `matching`, and an `escalated` one through `resumeMatching`.
+- **Who may allocate:** edit on the resource's module (blood for blood, beds, equipment, operatingRooms) at the
+  resource's hospital. Admins may allocate network-wide. Anyone else gets 403. These views declare `IsAuthenticated`,
+  and the per-type check runs on each hold.
+- **Refused (409, nothing saved):** a hold that isn't `held` or has passed its `expiresAt`, or a case that is
+  `fulfilled`, `closed` or `cancelled`. An unknown id is 404.
+- **The list** is ordered most urgent case first (severity, then the oldest case), then the hold expiring first.
+  It only shows the types your role can see. Asking for a type you can't see is 403.
+- **Permanent:** there is no endpoint to change or delete an allocation, and the admin page is read-only.
+- **Case detail:** gains `allocations` (oldest first), and each item gains `fulfilled` and `remaining`
+  (`quantity − fulfilled`). Each reservation entry gains `canAllocate`. The page merges allocations into the
+  timeline in time order.
+- **Audit:** `allocation.created`, plus `<model>.status_changed` for the resource move.
+- Expired holds are released before each of these endpoints answers, as for reservations.
+
 ## Demo data
 
 ```bash
