@@ -82,15 +82,21 @@ REQUEST_LIFECYCLE = StateMachine(
 )
 
 
+def severity_rank(field: str = "severity"):
+    """The position of a case's severity in `Severity`, 0 for the most severe.
+
+    `field` is the path to the severity, so the rank can be read from a related case."""
+    return Case(
+        *[When(**{field: level}, then=Value(i)) for i, level in enumerate(Severity.values)],
+        default=Value(len(Severity.values)),
+        output_field=models.PositiveSmallIntegerField(),
+    )
+
+
 class EmergencyRequestQuerySet(models.QuerySet):
     def by_priority(self):
         """Most severe first, then the case waiting longest (oldest), then id so the order is stable."""
-        rank = Case(
-            *[When(severity=level, then=Value(i)) for i, level in enumerate(Severity.values)],
-            default=Value(len(Severity.values)),
-            output_field=models.PositiveSmallIntegerField(),
-        )
-        return self.annotate(priority=rank).order_by("priority", "created_at", "id")
+        return self.annotate(priority=severity_rank()).order_by("priority", "created_at", "id")
 
 
 class EmergencyRequest(models.Model):

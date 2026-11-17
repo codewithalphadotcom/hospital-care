@@ -62,8 +62,9 @@ def resource_label(resource) -> str:
 
 
 def active_holds(item: RequestItem) -> int:
-    """How many of the need's resources are held or allocated right now."""
-    return item.reservations.filter(status__in=ACTIVE).count()
+    """How many of the need's resources are held right now. An allocated hold is already in the need's
+    fulfilled count, so it is not counted again (story #45)."""
+    return item.reservations.filter(status=ReservationStatus.HELD).count()
 
 
 def _free_resources(item: RequestItem, hospital, limit: int) -> list:
