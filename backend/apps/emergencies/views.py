@@ -120,8 +120,8 @@ class EmergencyFeedView(APIView):
 class CaseCandidatesView(APIView):
     """GET /api/emergencies/<reference>/candidates/ → the other hospitals that can supply each short
     requirement (story #38). Items with no shortfall are left out, so a case that is covered locally gets
-    `items: []`. The same read rule as the detail: another hospital's case is 404. Doesn't escalate, so it
-    stays a plain read."""
+    `items: []`. Each item's hospitals come ranked and scored, best first (story #41). The same read rule as
+    the detail: another hospital's case is 404. Doesn't escalate, so it stays a plain read."""
 
     permission_classes = [module_permission("emergencies")]
 

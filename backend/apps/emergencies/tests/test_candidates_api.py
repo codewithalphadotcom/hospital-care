@@ -1,10 +1,11 @@
 """Story #38: GET /api/emergencies/<reference>/candidates/, the other hospitals that can supply each short
-need."""
+need. Story #41: each item's hospitals come ranked and scored, with the breakdown of each score."""
 
 import itertools
 from datetime import timedelta
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -13,6 +14,7 @@ from apps.blood.models import BloodUnit, UnitStatus
 from apps.emergencies.models import EmergencyRequest, RequestItem, RequestStatusChange
 from apps.equipment.models import Equipment, EquipmentStatus
 from apps.hospitals.models import Bed, BedStatus, Ward
+from apps.matching.scoring import parse_scoring_config
 
 pytestmark = pytest.mark.django_db
 
@@ -178,3 +180,121 @@ def test_the_read_does_not_escalate_an_overdue_case(client_as, make_hospital, se
     assert doctor.get(reverse("emergency-case", args=[REFERENCE])).status_code == 200
     created.refresh_from_db()
     assert created.status == "escalated"  # the setup is overdue: the detail read does escalate it
+
+
+# Story #41: ranked results with their scores. The default scoring, whatever the environment says.
+
+
+@pytest.fixture(autouse=True)
+def default_scoring():
+    with override_settings(MATCHING_SCORING=parse_scoring_config(""), MATCHING_MAX_DISTANCE_KM=50):
+        yield
+
+
+def sole_item(client_as, hospital):
+    [item] = get(client_as(Role.DOCTOR, hospital=hospital)).json()["items"]
+    return item
+
+
+def test_blood_sources_are_ranked_earliest_expiry_first_at_equal_distance(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    later = make_hospital(name="Later")  # default coordinates: the same distance as here
+    soon = make_hospital(name="Soon")
+    for _ in range(4):
+        unit(later, expires_in=30)
+        unit(soon, expires_in=3)
+    case(here, blood(4))
+
+    item = sole_item(client_as, here)
+
+    assert item["strategy"] == {"name": "earliestExpiry", "label": "Earliest expiry first"}
+    assert [c["hospital"]["name"] for c in item["candidates"]] == ["Soon", "Later"]
+    assert [c["rank"] for c in item["candidates"]] == [1, 2]
+    assert [c["recommended"] for c in item["candidates"]] == [True, False]
+
+
+def test_bed_sources_are_ranked_nearest_first_even_when_created_later(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    far = make_hospital(name="Far", latitude="24.960700", longitude="67.001100")  # about 11 km north, first
+    near = make_hospital(name="Near")  # the same spot as here
+    for h in (far, near):
+        bed(h, "icu")
+        bed(h, "icu")
+    case(here, icu(2))
+
+    item = sole_item(client_as, here)
+
+    assert item["strategy"] == {"name": "nearest", "label": "Nearest first"}
+    assert [c["hospital"]["name"] for c in item["candidates"]] == ["Near", "Far"]
+
+
+def test_only_the_first_source_is_recommended(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    near = make_hospital(name="Near")
+    far = make_hospital(name="Far", latitude="24.960700", longitude="67.001100")
+    for h in (near, far):
+        bed(h, "icu")
+    case(here, icu(1))
+
+    item = sole_item(client_as, here)
+
+    assert [c["recommended"] for c in item["candidates"]] == [True, False]
+
+
+def test_a_first_source_with_a_score_of_zero_is_not_recommended(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    beyond = make_hospital(name="Beyond", latitude="25.560700", longitude="67.001100")  # about 78 km
+    bed(beyond, "icu")
+    case(here, icu(1))
+    # Only distance counts, and the hospital is past the maximum distance.
+    raw = '{"bed": {"weights": {"distance": 1, "quantity": 0}}}'
+
+    with override_settings(MATCHING_SCORING=parse_scoring_config(raw)):
+        item = sole_item(client_as, here)
+
+    [beyond_row] = item["candidates"]
+    assert (beyond_row["rank"], beyond_row["score"]["total"], beyond_row["recommended"]) == (1, 0.0, False)
+
+
+def test_each_candidate_breaks_its_score_down_into_points_that_add_up(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    there = make_hospital(name="There", latitude="24.960700", longitude="67.001100")  # about 11.1 km north
+    for _ in range(5):
+        unit(there, expires_in=9)
+    case(here, blood(3))
+
+    [row] = sole_item(client_as, here)["candidates"]
+    score = row["score"]
+
+    assert score["strategy"] == "earliestExpiry"
+    assert [f["name"] for f in score["factors"]] == ["expiry", "compatibility", "distance", "quantity"]
+    assert [f["label"] for f in score["factors"]] == ["Expiry", "Blood group match", "Distance", "Stock"]
+    assert {f["name"]: f["detail"] for f in score["factors"]} == {
+        "expiry": "expires in 9 days",
+        "compatibility": "identical group",
+        "distance": "11.1 km, about 17 min",
+        "quantity": "5 available, 3 needed",
+    }
+    assert sum(f["points"] for f in score["factors"]) == pytest.approx(score["total"], abs=0.05)
+    assert sum(f["weight"] for f in score["factors"]) == pytest.approx(1.0, abs=0.02)
+    assert all(0 <= f["value"] <= 1 for f in score["factors"])
+
+
+def test_the_scoring_setting_changes_the_order_through_the_api(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    near = make_hospital(name="Near")  # the same spot as here
+    deep = make_hospital(name="Deep", latitude="24.960700", longitude="67.001100")  # about 11 km north
+    bed(near, "icu")
+    bed(near, "icu")  # 2 of the 3 needed
+    for _ in range(3):
+        bed(deep, "icu")  # all 3
+    case(here, icu(3))
+    doctor = client_as(Role.DOCTOR, hospital=here)
+
+    [item] = get(doctor).json()["items"]
+    assert [c["hospital"]["name"] for c in item["candidates"]] == ["Near", "Deep"]
+
+    with override_settings(MATCHING_SCORING=parse_scoring_config('{"bed": {"strategy": "mostStock"}}')):
+        [item] = get(doctor).json()["items"]
+    assert [c["hospital"]["name"] for c in item["candidates"]] == ["Deep", "Near"]
+    assert item["strategy"] == {"name": "mostStock", "label": "Most stock first"}

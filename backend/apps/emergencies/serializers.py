@@ -5,6 +5,7 @@ from rest_framework import serializers
 from apps.blood.models import BloodGroup, Component
 from apps.equipment.models import EquipmentType
 from apps.hospitals.models import BedType
+from apps.matching.scoring import FACTOR_LABELS, rank, strategy_for
 from apps.operating_rooms.models import OrCapability
 
 from .availability import local_availability
@@ -191,17 +192,43 @@ class CaseDetailSerializer(CaseSerializer):
         return closes[-1].note if closes else None
 
 
-class CandidateSerializer(serializers.Serializer):
-    """One hospital that can supply a requirement (story #38). `earliestExpiry` and `bestDonorRank` are blood
-    only, so other types don't carry them."""
+def score_data(score) -> dict:
+    """A score as the API shows it (story #41): each factor's label, value and weight as shares, its points
+    and its detail. The points add up to the total."""
+    total_weight = sum(f.weight for f in score.factors)
+    return {
+        "total": score.total,
+        "strategy": score.strategy,
+        "factors": [
+            {
+                "name": f.name,
+                "label": FACTOR_LABELS[f.name],
+                "value": round(f.value, 2),
+                "weight": round(f.weight / total_weight, 2),
+                "points": f.points,
+                "detail": f.detail,
+            }
+            for f in score.factors
+        ],
+    }
 
-    def to_representation(self, candidate):
+
+class CandidateSerializer(serializers.Serializer):
+    """One hospital that can supply a requirement (story #38), ranked and scored (story #41).
+    `earliestExpiry` and `bestDonorRank` are blood only, so other types don't carry them. `recommended` is
+    true only for rank 1 when its score is above 0."""
+
+    def to_representation(self, ranked):
+        candidate = ranked.candidate
         data = {
             "hospital": {"id": candidate.hospital.pk, "name": candidate.hospital.name},
             "available": candidate.available,
             "covers": candidate.covers,
             "distanceKm": None if candidate.distance_km is None else round(candidate.distance_km, 1),
             "travelMinutes": candidate.travel_minutes,
+            "rank": ranked.rank,
+            "score": score_data(ranked.score),
+            "recommended": ranked.rank == 1 and ranked.score.total > 0,
         }
         if candidate.earliest_expiry is not None:
             data["earliestExpiry"] = serializers.DateTimeField().to_representation(candidate.earliest_expiry)
@@ -223,13 +250,15 @@ def need_label(item: RequestItem) -> str:
 
 
 class CandidateItemSerializer(serializers.Serializer):
-    """One short requirement and the hospitals that can supply it. Shape of `CandidateItem` in
-    api/emergencies.ts."""
+    """One short requirement and the hospitals that can supply it, in the order the scoring gives (story #41).
+    Shape of `CandidateItem` in api/emergencies.ts."""
 
     def to_representation(self, found):
+        strategy = strategy_for(found.item.resource_type)
         return {
             "itemId": found.item.pk,
             "need": need_label(found.item),
             "shortfall": found.shortfall,
-            "candidates": [CandidateSerializer(c).data for c in found.candidates],
+            "strategy": {"name": strategy.name, "label": strategy.label},
+            "candidates": [CandidateSerializer(ranked).data for ranked in rank(found)],
         }
