@@ -140,6 +140,56 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     })
   })
 
+  it('opens a case with equipment and an operating room, and says each the way staff do (#32)', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/emergencies')
+    const form = await openForm()
+    await userEvent.click(within(form).getByRole('radio', { name: /High/ }))
+    await next()
+
+    const first = within(form).getByRole('group', { name: 'Need 1' })
+    await userEvent.selectOptions(within(first).getByLabelText('Type'), 'equipment')
+    await userEvent.selectOptions(within(first).getByLabelText('Equipment'), 'ventilator')
+    await userEvent.clear(within(first).getByLabelText('Pieces'))
+    await userEvent.type(within(first).getByLabelText('Pieces'), '2')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add another need' }))
+    const second = within(form).getByRole('group', { name: 'Need 2' })
+    await userEvent.selectOptions(within(second).getByLabelText('Type'), 'operatingRoom')
+    await userEvent.selectOptions(within(second).getByLabelText('Capability'), 'cardiac')
+    await next()
+
+    expect(within(form).getByText('2 × Ventilator')).toBeInTheDocument()
+    expect(within(form).getByText('1 × Operating room (cardiac)')).toBeInTheDocument()
+    await userEvent.click(within(form).getByRole('button', { name: 'Open case' }))
+
+    expect(await screen.findByText('Case EC-2026-0003 is open.')).toBeInTheDocument()
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
+    expect(JSON.parse(String(post[1]!.body)).items).toEqual([
+      { type: 'equipment', equipmentType: 'ventilator', quantity: 2 },
+      { type: 'operatingRoom', capability: 'cardiac', quantity: 1 },
+    ])
+  })
+
+  it('shows a server refusal of an operating room’s capability on that field', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/emergencies')
+    const form = await openForm()
+    await userEvent.click(within(form).getByRole('radio', { name: /High/ }))
+    await next()
+    await userEvent.selectOptions(within(form).getByLabelText('Type'), 'operatingRoom')
+    await next()
+    vi.restoreAllMocks()
+    mockApi({
+      'GET /auth/me/': { body: userFor('doctor') },
+      'POST /emergencies/': fail(400, { items: { '0': { capability: ['Choose one of the listed capabilities.'] } } }),
+    })
+    await userEvent.click(within(form).getByRole('button', { name: 'Open case' }))
+
+    expect(await within(form).findByText('Choose one of the listed capabilities.')).toBeInTheDocument()
+    expect(within(form).getByLabelText('Capability')).toHaveAccessibleDescription('Choose one of the listed capabilities.')
+    expect(within(form).getByRole('heading', { name: 'Step 2 of 3: What’s needed' })).toBeInTheDocument()
+  })
+
   it('offers the four severity levels, most severe first (#31)', async () => {
     mockStaffApi({ role: 'doctor' })
     renderStaff('/staff/emergencies')

@@ -3,6 +3,8 @@ import type { BedType } from '../../api/beds'
 import { BLOOD_GROUPS, COMPONENTS, type BloodGroup, type Component } from '../../api/blood'
 import { ApiError } from '../../api/client'
 import { createCase, MAX_NEEDS, SEVERITIES, type EmergencyCase } from '../../api/emergencies'
+import type { EquipmentType } from '../../api/equipment'
+import { OR_CAPABILITIES, type OrCapability } from '../../api/operatingRooms'
 import { Button } from '../../components/form/Button'
 import { Field, FieldError } from '../../components/form/Field'
 import { FormAlert } from '../../components/form/FormAlert'
@@ -12,6 +14,7 @@ import { TYPE_LABEL } from '../beds/beds'
 import { formatGroup } from '../blood/blood'
 import {
   describeNeed,
+  EQUIPMENT_NEED_LABEL,
   emptyCase,
   hasErrors,
   newNeed,
@@ -162,7 +165,7 @@ export function NewCaseForm({ onCreated, onClose }: Props) {
                 key={need.key}
                 need={need}
                 index={i}
-                error={errors[`quantity-${need.key}`]}
+                errors={errors}
                 onChange={(change) => updateNeed(need.key, change)}
                 onRemove={values.needs.length > 1 ? () => removeNeed(need.key) : undefined}
               />
@@ -223,30 +226,42 @@ export function NewCaseForm({ onCreated, onClose }: Props) {
   )
 }
 
+/** What each type of need is counted in, for the quantity field's label. */
+const QUANTITY_LABEL: Record<NeedDraft['type'], string> = { blood: 'Units', bed: 'Beds', equipment: 'Pieces', operatingRoom: 'Rooms' }
+
 type NeedRowProps = {
   need: NeedDraft
   index: number
-  error?: string
+  /** The form's errors; this row reads its own, keyed `<field>-<key>`. */
+  errors: CaseErrors
   onChange: (change: Partial<NeedDraft>) => void
   onRemove?: () => void
 }
 
-function NeedRow({ need, index, error, onChange, onRemove }: NeedRowProps) {
+function NeedRow({ need, index, errors, onChange, onRemove }: NeedRowProps) {
   const id = (field: string) => `${field}-${need.key}`
+  const error = (field: string) => errors[id(field)]
+  /** A select's error is announced with it, as a text input's is. */
+  const selectError = (field: string) => ({
+    'aria-invalid': error(field) ? true : undefined,
+    'aria-describedby': error(field) ? `${id(field)}-error` : undefined,
+  })
   return (
     <fieldset className={styles.need}>
       <legend>Need {index + 1}</legend>
       <div className={styles.needFields}>
         <Field id={id('type')} label="Type">
-          <select id={id('type')} value={need.type} onChange={(e) => onChange({ type: e.target.value as NeedDraft['type'] })}>
+          <select id={id('type')} {...selectError('type')} value={need.type} onChange={(e) => onChange({ type: e.target.value as NeedDraft['type'] })}>
             <option value="blood">Blood</option>
             <option value="bed">Bed</option>
+            <option value="equipment">Equipment</option>
+            <option value="operatingRoom">Operating room</option>
           </select>
         </Field>
-        {need.type === 'blood' ? (
+        {need.type === 'blood' && (
           <>
-            <Field id={id('group')} label="Blood group">
-              <select id={id('group')} value={need.group} onChange={(e) => onChange({ group: e.target.value as BloodGroup })}>
+            <Field id={id('group')} label="Blood group" error={error('group')}>
+              <select id={id('group')} {...selectError('group')} value={need.group} onChange={(e) => onChange({ group: e.target.value as BloodGroup })}>
                 {BLOOD_GROUPS.map((g) => (
                   <option key={g} value={g}>
                     {formatGroup(g)}
@@ -254,8 +269,8 @@ function NeedRow({ need, index, error, onChange, onRemove }: NeedRowProps) {
                 ))}
               </select>
             </Field>
-            <Field id={id('component')} label="Component">
-              <select id={id('component')} value={need.component} onChange={(e) => onChange({ component: e.target.value as Component })}>
+            <Field id={id('component')} label="Component" error={error('component')}>
+              <select id={id('component')} {...selectError('component')} value={need.component} onChange={(e) => onChange({ component: e.target.value as Component })}>
                 {COMPONENTS.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
@@ -264,9 +279,10 @@ function NeedRow({ need, index, error, onChange, onRemove }: NeedRowProps) {
               </select>
             </Field>
           </>
-        ) : (
-          <Field id={id('bedType')} label="Bed type">
-            <select id={id('bedType')} value={need.bedType} onChange={(e) => onChange({ bedType: e.target.value as BedType })}>
+        )}
+        {need.type === 'bed' && (
+          <Field id={id('bedType')} label="Bed type" error={error('bedType')}>
+            <select id={id('bedType')} {...selectError('bedType')} value={need.bedType} onChange={(e) => onChange({ bedType: e.target.value as BedType })}>
               {(Object.keys(TYPE_LABEL) as BedType[]).map((t) => (
                 <option key={t} value={t}>
                   {TYPE_LABEL[t]}
@@ -275,13 +291,39 @@ function NeedRow({ need, index, error, onChange, onRemove }: NeedRowProps) {
             </select>
           </Field>
         )}
+        {need.type === 'equipment' && (
+          <Field id={id('equipmentType')} label="Equipment" error={error('equipmentType')}>
+            <select
+              id={id('equipmentType')} {...selectError('equipmentType')}
+              value={need.equipmentType}
+              onChange={(e) => onChange({ equipmentType: e.target.value as EquipmentType })}
+            >
+              {(Object.keys(EQUIPMENT_NEED_LABEL) as EquipmentType[]).map((t) => (
+                <option key={t} value={t}>
+                  {EQUIPMENT_NEED_LABEL[t]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {need.type === 'operatingRoom' && (
+          <Field id={id('capability')} label="Capability" error={error('capability')}>
+            <select id={id('capability')} {...selectError('capability')} value={need.capability} onChange={(e) => onChange({ capability: e.target.value as OrCapability })}>
+              {OR_CAPABILITIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <TextField
           id={id('quantity')}
-          label={need.type === 'blood' ? 'Units' : 'Beds'}
+          label={QUANTITY_LABEL[need.type]}
           inputMode="numeric"
           value={need.quantity}
           onChange={(quantity) => onChange({ quantity })}
-          error={error}
+          error={error('quantity')}
         />
       </div>
       {onRemove && (
