@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail, mockApi, mockStaffApi, userFor } from '../../test/mockApi'
 import { renderStaff } from '../../test/renderStaff'
-import { sampleCases } from '../../test/fixtures/emergencies'
+import { sampleCases, sampleNewNeedsCase } from '../../test/fixtures/emergencies'
 import type { StatusChange } from '../../api/emergencies'
 
 afterEach(() => vi.restoreAllMocks())
@@ -240,5 +240,65 @@ describe('EmergencyCasePage (story #35 escalation and closure)', () => {
     expect(entry).toHaveTextContent('Open → Escalated')
     expect(entry).toHaveTextContent('· System')
     expect(within(entry!).getByText('Not fulfilled within 30 minutes (automatic)')).toBeInTheDocument()
+  })
+})
+
+describe('EmergencyCasePage: the new kinds of need and sources in the network (#32, #38)', () => {
+  it('shows an equipment and an operating-room need with what this hospital has, as text', async () => {
+    mockStaffApi({ role: 'doctor', cases: [sampleNewNeedsCase(new Date())] })
+    renderStaff('/staff/emergencies/EC-2026-0003')
+
+    const panel = await screen.findByRole('region', { name: 'EC-2026-0003' })
+    const [vents, room] = within(within(panel).getByRole('list')).getAllByRole('listitem')
+    expect(within(vents!).getByText('2 × Ventilator')).toBeInTheDocument()
+    expect(within(vents!).getByText('Available here: 1 · Short: 1')).toBeInTheDocument()
+    expect(within(room!).getByText('1 × Operating room (cardiac)')).toBeInTheDocument()
+    expect(within(room!).getByText('Available here: 0 · Short: 1')).toBeInTheDocument()
+  })
+
+  it('lists, for each short need, the hospitals that have it: the marker, distance and expiry', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+    const blood = (await within(sources).findByRole('heading', { name: 'O− red cells: short 3' })).closest('section')!
+    const riverside = within(blood).getByText('Riverside Medical Centre').closest('li')!
+    expect(within(riverside).getByText('5 available')).toBeInTheDocument()
+    expect(within(riverside).getByText('covers it')).toBeInTheDocument()
+    expect(within(riverside).getByText('4.2 km · ~6 min')).toBeInTheDocument()
+    expect(within(riverside).getByText(/Earliest expiry/)).toBeInTheDocument()
+    const northside = within(blood).getByText("Northside Children's Hospital").closest('li')!
+    expect(within(northside).getByText('1 available')).toBeInTheDocument()
+    expect(within(northside).getByText('partial')).toBeInTheDocument()
+    expect(within(northside).getByText('Distance unknown')).toBeInTheDocument()
+  })
+
+  it('says no other hospital has a need that none of them have', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+    const bed = (await within(sources).findByRole('heading', { name: 'ICU bed: short 1' })).closest('section')!
+    expect(within(bed).getByText('No other hospital has this right now')).toBeInTheDocument()
+  })
+
+  it('lists the sources for the new kinds of need, and the empty state for an operating room', async () => {
+    mockStaffApi({ role: 'doctor', cases: [sampleNewNeedsCase(new Date())] })
+    renderStaff('/staff/emergencies/EC-2026-0003')
+
+    const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+    const vents = (await within(sources).findByRole('heading', { name: 'Ventilator: short 1' })).closest('section')!
+    expect(within(vents).getByText('covers it')).toBeInTheDocument()
+    const cardiac = (await within(sources).findByRole('heading', { name: 'Cardiac operating room: short 1' })).closest('section')!
+    expect(within(cardiac).getByText('No other hospital has this right now')).toBeInTheDocument()
+  })
+
+  it('does not ask for sources when the case is covered here', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor', cases: [sampleCases(new Date())[1]!] })
+    renderStaff('/staff/emergencies/EC-2026-0001')
+
+    await screen.findByRole('region', { name: 'EC-2026-0001' })
+    expect(screen.queryByRole('region', { name: 'Sources in the network' })).toBeNull()
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/candidates/'))).toBe(false)
   })
 })

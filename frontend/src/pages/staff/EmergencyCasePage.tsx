@@ -1,7 +1,18 @@
 import { useCallback, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError } from '../../api/client'
-import { getCase, MAX_NOTE, postCaseAction, SEVERITIES, type CaseAction, type EmergencyCaseDetail, type StatusChange } from '../../api/emergencies'
+import {
+  getCandidates,
+  getCase,
+  MAX_NOTE,
+  postCaseAction,
+  SEVERITIES,
+  type Candidate,
+  type CandidateItem,
+  type CaseAction,
+  type EmergencyCaseDetail,
+  type StatusChange,
+} from '../../api/emergencies'
 import { FormAlert } from '../../components/form/FormAlert'
 import { TextField } from '../../components/form/TextField'
 import { Panel } from '../../components/ui/Panel'
@@ -87,6 +98,8 @@ function CaseView({ reference }: { reference: string }) {
         </dl>
       </Panel>
 
+      {kase.shortfallTotal > 0 && <Sources reference={kase.id} />}
+
       {kase.outcome !== null && (
         <Panel title="Outcome" id="outcome">
           <p className={styles.outcome}>{kase.outcome}</p>
@@ -96,6 +109,70 @@ function CaseView({ reference }: { reference: string }) {
       {canEdit(role, 'emergencies') && <CaseMoves kase={kase} onMoved={(updated) => setData(() => updated)} />}
       <Timeline history={kase.history} />
     </div>
+  )
+}
+
+/** The server's blood group code, with the minus sign the rest of the page uses: "O- red cells" → "O− red cells". */
+const withMinus = (label: string) => label.replace(/^(AB|A|B|O)-/, '$1−')
+
+/** Distance and travel time as the sources list shows them: "4.2 km · ~6 min". */
+function distanceText(candidate: Candidate): string {
+  if (candidate.distanceKm === null || candidate.travelMinutes === null) return 'Distance unknown'
+  return `${candidate.distanceKm.toFixed(1)} km · ~${candidate.travelMinutes} min`
+}
+
+/**
+ * The other hospitals that can supply each short need (story #38). A plain list: ranking and scores are #41. Asked
+ * for only when the case has a shortfall, so a case covered locally makes no extra request.
+ */
+function Sources({ reference }: { reference: string }) {
+  const load = useCallback(() => getCandidates(reference), [reference])
+  const { result } = useLoad(load)
+  return (
+    <Panel title="Sources in the network" id="sources">
+      {result.state === 'loading' && <p role="status">Looking for hospitals…</p>}
+      {result.state === 'failed' && (
+        <p role="status">The network didn’t answer, so the sources aren’t shown. Reload the page to try again.</p>
+      )}
+      {result.state === 'ready' && (
+        <div className={styles.sources}>
+          {result.data.items.map((item) => (
+            <SourceItem key={item.itemId} item={item} />
+          ))}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/** One short need and the hospitals that have it, or the empty state when none do. */
+function SourceItem({ item }: { item: CandidateItem }) {
+  return (
+    <section className={styles.source}>
+      <h3 className={styles.sourceHeading}>
+        {withMinus(item.need)}: short {item.shortfall}
+      </h3>
+      {item.candidates.length === 0 ? (
+        <p className={styles.hint}>No other hospital has this right now</p>
+      ) : (
+        <ul className={styles.candidates}>
+          {item.candidates.map((candidate) => (
+            <li key={candidate.hospital.id}>
+              <strong>{candidate.hospital.name}</strong>{' '}
+              <span>{candidate.available} available</span>{' · '}
+              <span className={styles.marker}>{candidate.covers ? 'covers it' : 'partial'}</span>
+              <span className={styles.hint}>{distanceText(candidate)}</span>
+              {candidate.earliestExpiry && (
+                <span className={styles.hint}>
+                  Earliest expiry{' '}
+                  <time dateTime={candidate.earliestExpiry}>{formatShortDate(new Date(candidate.earliestExpiry))}</time>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
