@@ -1,7 +1,17 @@
 import { vi } from 'vitest'
 import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
-import type { CaseAction, CaseInput, CaseStatus, EmergencyCase, EmergencyCaseDetail, FeedEntry, Severity, StatusChange } from '../api/emergencies'
+import type {
+  CandidatesResponse,
+  CaseAction,
+  CaseInput,
+  CaseStatus,
+  EmergencyCase,
+  EmergencyCaseDetail,
+  FeedEntry,
+  Severity,
+  StatusChange,
+} from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
 import type {
@@ -23,7 +33,7 @@ import { canEdit, canSee, type Module, type Role } from '../features/staff/roles
 import { dateKey } from '../lib/time'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
-import { sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
+import { sampleCandidates, sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
 import { sampleMedicines } from './fixtures/pharmacy'
 import { samplePublicStatus } from './fixtures/publicStatus'
@@ -130,6 +140,8 @@ type StaffApiOptions = {
   histories?: Record<string, StatusChange[]>
   /** Use this network feed instead of the sample one, which is these cases plus another hospital's requests. */
   feed?: FeedEntry[]
+  /** Use these sources (story #38) for whichever case is asked for, instead of the sample ones. */
+  candidates?: CandidatesResponse
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -192,6 +204,7 @@ export function mockStaffApi({
   cases: customCases,
   histories: customHistories,
   feed: customFeed,
+  candidates: customCandidates,
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -342,6 +355,11 @@ export function mockStaffApi({
     'GET /emergencies/:reference/': view('emergencies', ({ params }) => {
       const found = findCase(params.reference)
       return found ? ok(detailOf(found)) : fail(404)
+    }),
+    'GET /emergencies/:reference/candidates/': view('emergencies', ({ params }) => {
+      if (!findCase(params.reference)) return fail(404)
+      if (customCandidates) return ok({ ...customCandidates, reference: params.reference })
+      return ok(sampleCandidates(now)[params.reference] ?? { reference: params.reference, items: [] })
     }),
     'POST /emergencies/:reference/actions/': edit('emergencies', ({ params, body }) => {
       const found = findCase(params.reference)
