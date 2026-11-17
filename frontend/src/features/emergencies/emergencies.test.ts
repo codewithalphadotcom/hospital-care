@@ -79,6 +79,48 @@ describe('emergency case form rules (#30, #32)', () => {
   })
 })
 
+describe('equipment and operating-room needs (#32, completed in #38)', () => {
+  const asType = (values: CaseFormValues, index: number, change: Partial<CaseFormValues['needs'][number]>) => {
+    values.needs[index] = { ...values.needs[index]!, ...change }
+    return values
+  }
+
+  it('describes them the way staff say them', () => {
+    expect(describeNeed({ type: 'equipment', equipmentType: 'ventilator', quantity: 2 })).toBe('2 × Ventilator')
+    expect(describeNeed({ type: 'equipment', equipmentType: 'dialysis', quantity: 1 })).toBe('1 × Dialysis machine')
+    expect(describeNeed({ type: 'operatingRoom', capability: 'cardiac', quantity: 1 })).toBe('1 × Operating room (cardiac)')
+  })
+
+  it('limits equipment to 5 per line and operating rooms to 3', () => {
+    expect(validateNeedsStep(asType(withNeeds('6'), 0, { type: 'equipment', equipmentType: 'monitor' }))['quantity-1']).toBe(
+      'At most 5 per line; add another line for more',
+    )
+    expect(validateNeedsStep(asType(withNeeds('4'), 0, { type: 'operatingRoom', capability: 'neuro' }))['quantity-1']).toBe(
+      'At most 3 per line; add another line for more',
+    )
+    expect(validateNeedsStep(asType(withNeeds('3'), 0, { type: 'operatingRoom', capability: 'neuro' }))).toEqual({})
+  })
+
+  it('sends only the field of each need’s own type', () => {
+    const values = asType(withNeeds('2', '1', '1'), 0, { type: 'equipment', equipmentType: 'dialysis' })
+    asType(values, 1, { type: 'operatingRoom', capability: 'trauma' })
+    expect(toCaseInput(values).items).toEqual([
+      { type: 'equipment', equipmentType: 'dialysis', quantity: 2 },
+      { type: 'operatingRoom', capability: 'trauma', quantity: 1 },
+      { type: 'blood', group: 'O-', component: 'redCells', quantity: 1 },
+    ])
+  })
+
+  it('puts the server’s error on the field it belongs to, in its row', () => {
+    const needs = asType(withNeeds('2'), 0, { type: 'operatingRoom' }).needs
+    const errors = serverErrors(new ApiError(400, { items: { '0': { capability: ['This field is required.'] } } }), needs)
+
+    expect(errors['capability-1']).toBe('This field is required.')
+    expect(errors['quantity-1']).toBeUndefined()
+    expect(stepWithErrors(errors)).toBe(1)
+  })
+})
+
 describe('case lifecycle mirror (#34)', () => {
   it('offers the moves each status allows, and none once a case is closed or cancelled', () => {
     expect(actionsFor('open')).toEqual(['startMatching', 'escalate', 'cancel'])

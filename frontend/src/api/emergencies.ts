@@ -1,6 +1,8 @@
 import type { BedType } from './beds'
 import type { BloodGroup, Component } from './blood'
 import { apiGet, apiPost } from './client'
+import type { EquipmentType } from './equipment'
+import type { OrCapability } from './operatingRooms'
 
 /** Most severe first. Lists come from the server in this order: severity, then the oldest case first (story #31). */
 export type Severity = 'critical' | 'high' | 'moderate' | 'low'
@@ -8,7 +10,9 @@ export type CaseStatus = 'open' | 'matching' | 'partiallyFulfilled' | 'fulfilled
 
 export type BloodNeed = { type: 'blood'; group: BloodGroup; component: Component; quantity: number }
 export type BedNeed = { type: 'bed'; bedType: BedType; quantity: number }
-export type Need = BloodNeed | BedNeed
+export type EquipmentNeed = { type: 'equipment'; equipmentType: EquipmentType; quantity: number }
+export type OperatingRoomNeed = { type: 'operatingRoom'; capability: OrCapability; quantity: number }
+export type Need = BloodNeed | BedNeed | EquipmentNeed | OperatingRoomNeed
 
 /** An emergency case (stories #30, #32). Shape of `CaseSerializer` in backend/apps/emergencies/serializers.py. */
 export interface EmergencyCase {
@@ -48,6 +52,39 @@ export interface FeedEntry {
 }
 
 export type FeedType = 'blood' | 'bed'
+
+/** A hospital that can supply one requirement (story #38). Shape of `CandidateSerializer`. */
+export interface Candidate {
+  hospital: { id: number; name: string }
+  /** Matchable at that hospital for this requirement. */
+  available: number
+  /** Whether `available` is at least the shortfall. */
+  covers: boolean
+  /** Straight-line distance, one decimal. Null when either side has no coordinates or the case has no hospital. */
+  distanceKm: number | null
+  /** Estimated travel time in whole minutes (#39). Null with `distanceKm`. */
+  travelMinutes: number | null
+  /** Blood only: the soonest expiry among the matching units. */
+  earliestExpiry?: string
+  /** Blood only: 0 is the identical group; higher is a compatible substitute. */
+  bestDonorRank?: number
+}
+
+/** One short requirement and the hospitals that can supply it. Shape of `CandidateItemSerializer`. */
+export interface CandidateItem {
+  itemId: number
+  /** A label such as "O- red cells", "ICU bed", "Ventilator" or "Cardiac operating room". */
+  need: string
+  shortfall: number
+  /** Covering first, then nearest, then hospital id. */
+  candidates: Candidate[]
+}
+
+/** The sources for a case (story #38). `items` holds only the short needs: empty when all are covered locally. */
+export interface CandidatesResponse {
+  reference: string
+  items: CandidateItem[]
+}
 
 /** A move along the lifecycle (story #34). The names match REQUEST_LIFECYCLE in backend/apps/emergencies/models.py. */
 export type CaseAction = 'startMatching' | 'partiallyFulfil' | 'fulfil' | 'escalate' | 'resumeMatching' | 'close' | 'cancel'
@@ -91,7 +128,7 @@ export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[
 
 /** Same limits as the API. */
 export const MAX_NEEDS = 10
-export const MAX_QUANTITY: Record<Need['type'], number> = { blood: 20, bed: 5 }
+export const MAX_QUANTITY: Record<Need['type'], number> = { blood: 20, bed: 5, equipment: 5, operatingRoom: 3 }
 export const MAX_PATIENT_REF = 30
 export const MAX_NOTE = 500
 
@@ -103,6 +140,11 @@ export function getCases(): Promise<EmergencyCase[]> {
 /** Open a case. POST /api/emergencies/ (emergencies: edit). */
 export function createCase(input: CaseInput): Promise<EmergencyCase> {
   return apiPost<EmergencyCase>('/emergencies/', input)
+}
+
+/** The hospitals that can supply each short need of a case (story #38). GET /api/emergencies/<reference>/candidates/. */
+export function getCandidates(reference: string): Promise<CandidatesResponse> {
+  return apiGet<CandidatesResponse>(`/emergencies/${encodeURIComponent(reference)}/candidates/`)
 }
 
 /** One case with its timeline. GET /api/emergencies/<reference>/ (emergencies: view). Another hospital's is 404. */
