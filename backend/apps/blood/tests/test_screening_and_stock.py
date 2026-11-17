@@ -118,22 +118,23 @@ def test_units_past_expiry_are_marked_expired_and_logged():
     assert AuditLog.objects.filter(action="bloodunit.status_changed", actor=None).count() == 1
 
 
-def test_stock_counts_per_group_and_component_with_low_stock_and_near_expiry(staff, settings):
-    settings.BLOOD_LOW_STOCK_UNITS = 2
+def test_stock_counts_per_group_and_component_with_low_stock_and_near_expiry(staff):
     make_unit("A1", status=UnitStatus.AVAILABLE, expires_in=2)
     make_unit("A2", status=UnitStatus.AVAILABLE, expires_in=20)
     make_unit("R1", status=UnitStatus.RESERVED)
     make_unit("B1", status=UnitStatus.AVAILABLE, group="B+")
 
     data = staff.get(reverse("blood-stock")).json()
-    assert data["nearExpiryDays"] == 3 and data["lowStockUnits"] == 2
+    assert data["nearExpiryDays"] == 3
     rows = {(r["group"], r["component"]): r for r in data["rows"]}
     assert len(rows) == 8 * 4
     assert rows[("O-", "redCells")] == {
         "group": "O-", "component": "redCells", "available": 2, "reserved": 1, "quarantined": 0,
-        "nearExpiry": 1, "low": False,
+        "nearExpiry": 1, "minimum": 6, "level": "critical", "low": True,
     }  # fmt: skip
-    assert rows[("B+", "redCells")]["low"] is True
+    # Levels use the same per-group minimums as the UI: 1 of 30 is critical, 0 of a 0 minimum is fine.
+    assert rows[("B+", "redCells")]["level"] == "critical"
+    assert (rows[("AB-", "platelets")]["minimum"], rows[("AB-", "platelets")]["level"]) == (0, "ok")
     assert [u["id"] for u in data["nearExpiryUnits"]] == ["A1"]
 
 

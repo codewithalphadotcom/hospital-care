@@ -69,6 +69,23 @@ class ScreeningTest(models.TextChoices):
 
 REQUIRED_TESTS = list(ScreeningTest.values)
 
+# Minimum stock (par level) per component and blood group, sized to demand (story #19). Below it the
+# stock is "low"; below half of it, "critical". Mirrors MINIMUM_STOCK in frontend/src/api/blood.ts;
+# scripts/check_shared_rules.py fails CI if they drift.
+MINIMUM_STOCK = {
+    Component.RED_CELLS: {"O-": 6, "O+": 30, "A-": 4, "A+": 20, "B-": 4, "B+": 30, "AB-": 2, "AB+": 8},
+    Component.PLASMA: {"O-": 2, "O+": 10, "A-": 2, "A+": 8, "B-": 2, "B+": 10, "AB-": 2, "AB+": 6},
+    Component.PLATELETS: {"O-": 1, "O+": 3, "A-": 1, "A+": 3, "B-": 1, "B+": 3, "AB-": 0, "AB+": 1},
+    Component.CRYO: {"O-": 0, "O+": 2, "A-": 0, "A+": 2, "B-": 0, "B+": 2, "AB-": 0, "AB+": 1},
+}
+
+
+def stock_level(count: int, minimum: int) -> str:
+    """Same rule as stockLevel() in frontend/src/features/blood/blood.ts."""
+    if count < minimum / 2:
+        return "critical"
+    return "low" if count < minimum else "ok"
+
 
 def min_donation_interval() -> timedelta:
     return timedelta(days=settings.BLOOD_MIN_DONATION_INTERVAL_DAYS)

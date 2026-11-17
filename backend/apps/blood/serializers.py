@@ -15,7 +15,7 @@ from .models import (
 )
 
 # Days each component stays usable, counted from collection. Mirrors COMPONENTS.shelfLifeDays
-# in frontend/src/api/blood.ts; keep both in sync.
+# in frontend/src/api/blood.ts; scripts/check_shared_rules.py fails CI if they drift.
 SHELF_LIFE_DAYS = {
     Component.RED_CELLS: 42,
     Component.PLASMA: 365,

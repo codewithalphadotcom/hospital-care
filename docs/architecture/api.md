@@ -72,8 +72,9 @@ BloodUnitDetail = BloodUnit & {
 }
 Test = 'hiv' | 'hbv' | 'hcv' | 'syphilis' | 'malaria'
 BloodStock = {
-  nearExpiryDays: number, lowStockUnits: number,
-  rows: { group, component, available, reserved, quarantined, nearExpiry: number, low: boolean }[],  // 8 groups × 4 components
+  nearExpiryDays: number,
+  rows: { group, component, available, reserved, quarantined, nearExpiry, minimum: number,
+          level: 'ok' | 'low' | 'critical', low: boolean }[],  // 8 groups × 4 components
   nearExpiryUnits: BloodUnit[]  // available units expiring within nearExpiryDays, soonest first
 }
 Donor = {
@@ -94,9 +95,12 @@ Appointment = { id: number, donorId: string, donorName: string, startsAt: string
   `discard` (400 without a reason). A move the lifecycle doesn't allow → 409.
 - **Expiry (#19):** units past their expiry date are marked `expired` (audit-logged, actor "system") by
   `python manage.py expire_blood_units` (schedule it hourly) and every time the stock view loads.
-- **Stock (#19):** only `available` units count. `low` is true below `BLOOD_LOW_STOCK_UNITS` (default 5).
+- **Stock (#19):** only `available` units count. Each row's `minimum` is its par level from `MINIMUM_STOCK`
+  (`backend/apps/blood/models.py`, identical to the UI's table in `frontend/src/api/blood.ts`). `level` is
+  `critical` below half the minimum, `low` below it, otherwise `ok`; `low` is true unless the level is `ok`.
   `nearExpiryDays` defaults to `BLOOD_NEAR_EXPIRY_DAYS` (3); 0–60, otherwise 400.
 - **Donors (#20):** synthetic identities only. A unit's group must match its donor's group (400 on `donorId`).
+  Linking a unit to, or booking, a donor registered at another hospital → 403 (admins excepted).
 - **Eligibility (#21):** a donor can't give again within `BLOOD_MIN_DONATION_INTERVAL_DAYS` (56). Units collected
   the same day count as one donation (components). Screening `{eligible: false}` needs a reason; no
   `deferredUntil` means a permanent deferral. `{eligible: true}` clears it.

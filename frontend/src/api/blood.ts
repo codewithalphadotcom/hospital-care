@@ -41,7 +41,8 @@ export const COMPONENTS: readonly {
   { id: 'cryo', label: 'Cryo', shelfLifeDays: 365, storage: '≤ −25 °C', location: ['Plasma freezer B'] },
 ]
 
-/** Minimum stock (par level) per component and group, sized to demand. */
+/** Minimum stock (par level) per component and group, sized to demand. Same table as MINIMUM_STOCK in
+ * backend/apps/blood/models.py; scripts/check_shared_rules.py fails CI if they drift. */
 export const MINIMUM_STOCK: Record<Component, Record<BloodGroup, number>> = {
   redCells: { 'O-': 6, 'O+': 30, 'A-': 4, 'A+': 20, 'B-': 4, 'B+': 30, 'AB-': 2, 'AB+': 8 },
   plasma: { 'O-': 2, 'O+': 10, 'A-': 2, 'A+': 8, 'B-': 2, 'B+': 10, 'AB-': 2, 'AB+': 6 },

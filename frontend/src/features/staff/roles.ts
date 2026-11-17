@@ -29,6 +29,7 @@ type Access = 'view' | 'edit'
 /**
  * Who can open each module, and who can change things in it. Modules not listed are hidden.
  * Keep identical to ACCESS in backend/apps/accounts/permissions.py: the API enforces it, this only hides things.
+ * scripts/check_shared_rules.py fails CI if the two drift.
  */
 const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
   admin: { overview: 'view', beds: 'edit', blood: 'edit', pharmacy: 'edit', hospitals: 'edit', users: 'edit' },
