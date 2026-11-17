@@ -12,6 +12,7 @@ import HospitalFormPage from './pages/staff/HospitalFormPage'
 import HospitalsPage from './pages/staff/HospitalsPage'
 import OverviewPage from './pages/staff/OverviewPage'
 import EquipmentPage from './pages/staff/EquipmentPage'
+import OperatingRoomSchedulePage from './pages/staff/OperatingRoomSchedulePage'
 import OperatingRoomsPage from './pages/staff/OperatingRoomsPage'
 import PharmacyPage from './pages/staff/PharmacyPage'
 import PlannedPage from './pages/staff/PlannedPage'
@@ -30,6 +31,7 @@ export function AppRoutes() {
         <Route path="pharmacy" element={<PharmacyPage />} />
         <Route path="equipment" element={<EquipmentPage />} />
         <Route path="operating-rooms" element={<OperatingRoomsPage />} />
+        <Route path="operating-rooms/schedule" element={<OperatingRoomSchedulePage />} />
         <Route path="hospitals" element={<HospitalsPage />} />
         <Route path="hospitals/new" element={<HospitalFormPage />} />
         <Route path="hospitals/:id" element={<HospitalDetailPage />} />

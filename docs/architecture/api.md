@@ -137,7 +137,7 @@ maintenance and out-of-service equipment is never matched.
 ## Operating rooms (Sprint 4)
 
 Operating rooms and what each is equipped for (#28). Access: admin and nurse **edit**, doctor **view**; other
-roles 403. Staff see only their own hospital's rooms; every registration is audit-logged.
+roles 403. Staff see only their own hospital's rooms; every registration is audit-logged. Bookings (#29) below.
 
 | Method | Path | Body | Success |
 |---|---|---|---|
@@ -163,6 +163,50 @@ hospital's room). Registration is audit-logged as `operatingroom.registered`; st
 `operatingroom.status_changed` (the shared `change_status` helper names them after the model).
 `OperatingRoom.objects.matchable()` returns only `available` rooms, and `with_capability(code)` filters by capability.
 
+### Bookings and the day schedule (story #29)
+
+Booking a slot is open to admin, nurse and doctor (`orBookings`: edit); the day view needs `operatingRooms` view.
+Other roles get 403. Same own-hospital rule: another hospital's room is **404**.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/operating-rooms/schedule/?date=YYYY-MM-DD` | – | `Schedule` (`date` defaults to today, local time; a bad date → 400) |
+| POST | `/operating-rooms/bookings/` | `{roomId, startsAt, endsAt, procedure, surgeon?, patientInitials?}` | 201 `Booking` |
+| POST | `/operating-rooms/bookings/<id>/cancel/` | – | 200 `Booking`, now `cancelled`; 409 if it already is |
+
+```ts
+Schedule = { date: string, rooms: { id, name, status, capabilities, bookings: Booking[] }[] }
+   // every room in the user's hospital (every room for a user without one), by name
+Booking = {
+  id: number, roomId: number,
+  startsAt: string, endsAt: string,   // ISO 8601 with offset, e.g. "2030-01-15T09:00:00+05:00"
+  procedure: string, surgeon: string, patientInitials: string,  // surgeon and initials may be ""
+  status: 'booked' | 'cancelled', bookedBy: string                // bookedBy is the booker's full name
+}
+```
+
+- **Half-open times.** A booking covers `[startsAt, endsAt)`: 10:00–11:00 and 11:00–12:00 in the same room are
+  both allowed. A booking must end after it starts, last at most 24 hours, and start in the future (5 minutes of
+  slack). An out-of-service room is refused (400).
+- **Overlaps are refused twice.** The service locks the room row and answers **400**
+  `{"startsAt": ["OR 1 is already booked from 10:00 to 11:00."]}` (times in local time). The database
+  backstops it with an exclusion constraint on `operating_rooms_orbooking` (PostgreSQL only; SQLite can't
+  express it, so the migration skips it there):
+
+  ```sql
+  EXCLUDE USING GIST (
+    (int8range(room_id, room_id, '[]')) WITH &&,
+    (tstzrange(starts_at, ends_at, '[)')) WITH &&
+  ) WHERE (status = 'booked')
+  ```
+
+  Two range expressions stand in for `btree_gist`'s room `=`, so the extension isn't needed. Cancelled rows are
+  outside the condition, so a cancelled slot can be booked again. A `CHECK (ends_at > starts_at)` covers every
+  backend.
+- Booking and cancelling are audit-logged as `orbooking.created` and `orbooking.cancelled`. Cancelling keeps the row.
+- The schedule lists only `booked` slots that overlap the local calendar day, in time order. A slot that runs past
+  midnight appears on both days.
+
 ## Demo data
 
 ```bash
@@ -172,6 +216,7 @@ docker compose exec backend python manage.py seed_demo --reset  # start the demo
 
 Creates 3 hospitals (CityCare General, Seaview, Northside Children's) with 10 departments, 12 wards / 164 beds
 (ICU, emergency, general, isolation and NICU) and 10 storage locations, plus 320 blood units (with screening results), 60 synthetic donors (two deferred) and 6 upcoming donation
-appointments, 23 medicines, 14 doctor shifts, the ER status, and one login per
+appointments, 23 medicines, 14 doctor shifts, three operating rooms per hospital with a few bookings today and
+tomorrow, the ER status, and one login per
 role (`admin@`, `doctor@`, `nurse@`, `bloodbank@`, `pharmacist@`, `patient@demo.citycare.pk`, password
 `CityCare-demo-1`). Demo only: never run it against real data.

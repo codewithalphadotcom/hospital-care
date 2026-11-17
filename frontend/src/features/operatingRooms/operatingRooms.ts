@@ -1,4 +1,13 @@
 import type { OperatingRoom, OperatingRoomAction, OrStatus } from '../../api/operatingRooms'
+import type { Tone } from '../../components/ui/StatusBadge'
+
+export const ROOM_TONE: Record<OrStatus, Tone> = {
+  available: 'ok',
+  inUse: 'neutral',
+  cleaning: 'neutral',
+  maintenance: 'warning',
+  outOfService: 'critical',
+}
 
 type Transition = { action: OperatingRoomAction; label: string; next: OrStatus }
 
@@ -30,4 +39,14 @@ export function applyOperatingRoomAction(room: OperatingRoom, action: OperatingR
   const transition = TRANSITIONS[room.status].find((t) => t.action === action)
   if (!transition) throw new Error(`Can't ${action} a operating room that is ${room.status}`)
   return { ...room, status: transition.next, statusSince: now.toISOString() }
+}
+
+/** "09:30", in the hospital's time zone whatever the browser's is. */
+export function clockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Karachi' })
+}
+
+/** "09:00–13:00", in the hospital's time zone. */
+export function slotRange(startsAt: string, endsAt: string): string {
+  return `${clockTime(startsAt)}–${clockTime(endsAt)}`
 }

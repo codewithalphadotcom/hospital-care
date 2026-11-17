@@ -1,5 +1,14 @@
 export type Role = 'admin' | 'doctor' | 'nurse' | 'bloodBank' | 'pharmacist'
-export type Module = 'overview' | 'beds' | 'blood' | 'pharmacy' | 'equipment' | 'operatingRooms' | 'hospitals' | 'users'
+export type Module =
+  | 'overview'
+  | 'beds'
+  | 'blood'
+  | 'pharmacy'
+  | 'equipment'
+  | 'operatingRooms'
+  | 'orBookings'
+  | 'hospitals'
+  | 'users'
 
 export const ROLES: readonly { id: Role; label: string }[] = [
   { id: 'admin', label: 'Admin' },
@@ -40,6 +49,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     pharmacy: 'edit',
     equipment: 'edit',
     operatingRooms: 'edit',
+    orBookings: 'edit',
     hospitals: 'edit',
     users: 'edit',
   },
@@ -50,9 +60,18 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     pharmacy: 'view',
     equipment: 'view',
     operatingRooms: 'view',
+    orBookings: 'edit', // surgeons book their own slots (story #29)
     hospitals: 'view',
   },
-  nurse: { overview: 'view', beds: 'edit', pharmacy: 'view', equipment: 'edit', operatingRooms: 'edit', hospitals: 'view' },
+  nurse: {
+    overview: 'view',
+    beds: 'edit',
+    pharmacy: 'view',
+    equipment: 'edit',
+    operatingRooms: 'edit',
+    orBookings: 'edit',
+    hospitals: 'view',
+  },
   bloodBank: { overview: 'view', blood: 'edit', hospitals: 'view' },
   pharmacist: { overview: 'view', pharmacy: 'edit', hospitals: 'view' },
 }

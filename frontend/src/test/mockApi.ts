@@ -3,7 +3,14 @@ import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
-import type { OperatingRoom, OperatingRoomAction, OperatingRoomInput, OrCapability } from '../api/operatingRooms'
+import type {
+  OperatingRoom,
+  OperatingRoomAction,
+  OperatingRoomInput,
+  OrBooking,
+  OrBookingInput,
+  OrCapability,
+} from '../api/operatingRooms'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
 import type { UserSummary } from '../api/users'
@@ -11,6 +18,7 @@ import { applyAction } from '../features/beds/beds'
 import { applyEquipmentAction } from '../features/equipment/equipment'
 import { applyOperatingRoomAction } from '../features/operatingRooms/operatingRooms'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
+import { dateKey } from '../lib/time'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
@@ -122,6 +130,30 @@ export function sampleOperatingRooms(now: Date): OperatingRoom[] {
   ]
 }
 
+/** Today's bookings (story #29): two in OR 1 with a gap before the next, one in Cardiac theatre. Times in Karachi. */
+export function sampleOrBookings(now: Date): OrBooking[] {
+  const day = dateKey(now)
+  const slot = (id: number, roomId: number, start: string, end: string, procedure: string, surgeon: string): OrBooking => ({
+    id,
+    roomId,
+    startsAt: `${day}T${start}:00+05:00`,
+    endsAt: `${day}T${end}:00+05:00`,
+    procedure,
+    surgeon,
+    patientInitials: 'A.K.',
+    status: 'booked',
+    bookedBy: 'Hina Javed',
+  })
+  return [
+    slot(1, 1, '09:00', '13:00', 'CABG', 'Dr. Ayesha Khan'),
+    slot(2, 2, '08:00', '10:00', 'Appendicectomy', 'Dr. Bilal Ahmed'),
+    slot(3, 2, '10:00', '12:30', 'Cholecystectomy', 'Dr. Bilal Ahmed'),
+  ]
+}
+
+/** "+05:00"-stamped time as HH:MM, the way the server words a clash. */
+const clock = (iso: string) => iso.slice(11, 16)
+
 export function mockStaffApi({ role, erDown = false, board: customBoard, publicStatus, networkDown = false }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -130,6 +162,7 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
   const users = sampleUsers()
   const equipment = sampleEquipment(now)
   const rooms = sampleOperatingRooms(now)
+  const bookings = sampleOrBookings(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
   /** Like gate, but the reply sees the request, and `networkDown` fails it. Reads need view, writes need edit. */
@@ -263,6 +296,42 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
       }
       rooms.push(created)
       return { status: 201, body: created }
+    }),
+    'GET /operating-rooms/schedule/': view('operatingRooms', ({ query }) => {
+      const date = query.get('date') ?? dateKey(now)
+      return ok({
+        date,
+        rooms: rooms.map((room) => ({
+          id: room.id,
+          name: room.name,
+          status: room.status,
+          capabilities: room.capabilities,
+          bookings: bookings
+            .filter((b) => b.roomId === room.id && b.status === 'booked' && b.startsAt.startsWith(date))
+            .sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
+        })),
+      })
+    }),
+    'POST /operating-rooms/bookings/': edit('orBookings', ({ body }) => {
+      const input = body as OrBookingInput
+      const room = rooms.find((r) => r.id === input.roomId)
+      if (!room) return fail(400, { roomId: ['Pick a room.'] })
+      const clash = bookings.find(
+        (b) => b.roomId === room.id && b.status === 'booked' && b.startsAt < input.endsAt && b.endsAt > input.startsAt,
+      )
+      if (clash) {
+        return fail(400, { startsAt: [`${room.name} is already booked from ${clock(clash.startsAt)} to ${clock(clash.endsAt)}.`] })
+      }
+      const created: OrBooking = { ...input, id: nextId++, status: 'booked', bookedBy: NAMES.nurse }
+      bookings.push(created)
+      return { status: 201, body: created }
+    }),
+    'POST /operating-rooms/bookings/:id/cancel/': edit('orBookings', ({ params }) => {
+      const booking = bookings.find((b) => b.id === Number(params.id))
+      if (!booking) return fail(404)
+      if (booking.status === 'cancelled') return fail(409, { detail: 'This booking is already cancelled.' })
+      booking.status = 'cancelled'
+      return ok(booking)
     }),
     'POST /operating-rooms/:id/actions/': edit('operatingRooms', ({ params, body }) => {
       const index = rooms.findIndex((r) => r.id === Number(params.id))

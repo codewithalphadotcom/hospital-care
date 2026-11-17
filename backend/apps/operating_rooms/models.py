@@ -1,4 +1,6 @@
+from django.conf import settings
 from django.db import models
+from django.db.models import F, Q
 from django.db.models.functions import Lower
 
 from apps.resources.models import Resource
@@ -88,3 +90,35 @@ class OperatingRoom(Resource):
 
     def __str__(self):
         return self.name
+
+
+class OrBookingStatus(models.TextChoices):
+    BOOKED = "booked", "Booked"
+    CANCELLED = "cancelled", "Cancelled"
+
+
+class OrBooking(models.Model):
+    """A booked time slot in one operating room (story #29). Times are half-open: [starts_at, ends_at)."""
+
+    room = models.ForeignKey(OperatingRoom, on_delete=models.PROTECT, related_name="bookings")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    procedure = models.CharField(max_length=120)
+    surgeon = models.CharField(max_length=120, blank=True)
+    patient_initials = models.CharField(max_length=10, blank=True)  # minimal patient data, as for Bed
+    status = models.CharField(max_length=10, choices=OrBookingStatus.choices, default=OrBookingStatus.BOOKED)
+    booked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["starts_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(ends_at__gt=F("starts_at")), name="or_booking_ends_after_start"
+            ),
+            # No-overlap is a Postgres EXCLUDE constraint, or_booking_no_overlap_per_room, added in migration
+            # 0002 and kept out of Meta so SQLite, which can't run it, never rebuilds the table with it.
+        ]
+
+    def __str__(self):
+        return self.procedure

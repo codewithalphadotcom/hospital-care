@@ -10,7 +10,7 @@ Demo data only: never run against a database with real patients.
 """
 
 import random
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -40,7 +40,7 @@ from apps.hospitals.models import (
     StorageLocation,
     Ward,
 )
-from apps.operating_rooms.models import OperatingRoom, OrStatus
+from apps.operating_rooms.models import OperatingRoom, OrBooking, OrStatus
 from apps.pharmacy.models import Batch, Medicine
 
 DEMO_PASSWORD = "CityCare-demo-1"
@@ -494,6 +494,16 @@ FORMULARY = [
 
 LETTERS = "ABDFGHIKMNORSTUYZ"
 
+# Story #29: room, days from today, start, end, procedure, surgeon, patient initials (no full names).
+OR_BOOKINGS = [
+    ("Cardiac theatre", 0, time(9), time(13), "CABG", "Dr. Ayesha Khan", "M.H."),
+    ("OR 1", 0, time(8), time(10), "Appendicectomy", "Dr. Bilal Ahmed", "A.K."),
+    ("OR 1", 0, time(10), time(12, 30), "Cholecystectomy", "Dr. Bilal Ahmed", "S.R."),
+    ("Trauma theatre", 0, time(14), time(16), "Craniotomy", "Dr. Imran Qureshi", "F.Z."),
+    ("OR 1", 1, time(8, 30), time(10, 30), "Hernia repair", "Dr. Bilal Ahmed", "T.B."),
+    ("Cardiac theatre", 1, time(9), time(11), "Valve replacement", "Dr. Ayesha Khan", "N.Q."),
+]
+
 
 def weighted(rand: random.Random, shares: dict):
     return rand.choices(list(shares), weights=list(shares.values()))[0]
@@ -513,6 +523,7 @@ class Command(BaseCommand):
         if reset:
             models = (
                 Equipment,
+                OrBooking,  # before the rooms: a booking holds its room (PROTECT)
                 OperatingRoom,
                 Bed,
                 DonationAppointment,
@@ -545,6 +556,8 @@ class Command(BaseCommand):
         for hospital in hospitals:
             if not OperatingRoom.objects.filter(hospital=hospital).exists():
                 self.seed_operating_rooms(hospital)
+        for hospital in hospitals:
+            self.seed_or_bookings(hospital, now)
         if not Donor.objects.exists():
             # Own random stream, so adding donors doesn't change any of the data seeded before Sprint 3.
             self.seed_donors(random.Random(seed * 1000), now, main)
@@ -790,6 +803,26 @@ class Command(BaseCommand):
         OperatingRoom.objects.bulk_create(
             OperatingRoom(hospital=hospital, name=n, capabilities=caps, location=loc, status=st)
             for n, caps, loc, st in rooms
+        )
+
+    def seed_or_bookings(self, hospital: Hospital, now):
+        """Story #29: a few booked slots today and tomorrow in each demo hospital's rooms. Idempotent."""
+        if OrBooking.objects.filter(room__hospital=hospital).exists():
+            return
+        rooms = {room.name: room for room in OperatingRoom.objects.filter(hospital=hospital)}
+        booked_by = User.objects.get(username="nurse@demo.citycare.pk")
+        today = timezone.localdate(now)
+        OrBooking.objects.bulk_create(
+            OrBooking(
+                room=rooms[room],
+                booked_by=booked_by,
+                starts_at=timezone.make_aware(datetime.combine(today + timedelta(days=days), start)),
+                ends_at=timezone.make_aware(datetime.combine(today + timedelta(days=days), end)),
+                procedure=procedure,
+                surgeon=surgeon,
+                patient_initials=initials,
+            )
+            for room, days, start, end, procedure, surgeon, initials in OR_BOOKINGS
         )
 
     def seed_pharmacy(self, now):

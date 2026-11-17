@@ -3,11 +3,11 @@ import { canEdit, canSee, moduleForPath, MODULES, ROLES, type Module, type Role 
 
 // The access table from the design spec: v = view only, e = edit, - = no access.
 const TABLE: Record<Role, Record<Module, 'v' | 'e' | '-'>> = {
-  admin: { overview: 'v', beds: 'e', blood: 'e', pharmacy: 'e', equipment: 'e', operatingRooms: 'e', hospitals: 'e', users: 'e' },
-  doctor: { overview: 'v', beds: 'v', blood: 'v', pharmacy: 'v', equipment: 'v', operatingRooms: 'v', hospitals: 'v', users: '-' },
-  nurse: { overview: 'v', beds: 'e', blood: '-', pharmacy: 'v', equipment: 'e', operatingRooms: 'e', hospitals: 'v', users: '-' },
-  bloodBank: { overview: 'v', beds: '-', blood: 'e', pharmacy: '-', equipment: '-', operatingRooms: '-', hospitals: 'v', users: '-' },
-  pharmacist: { overview: 'v', beds: '-', blood: '-', pharmacy: 'e', equipment: '-', operatingRooms: '-', hospitals: 'v', users: '-' },
+  admin: { overview: 'v', beds: 'e', blood: 'e', pharmacy: 'e', equipment: 'e', operatingRooms: 'e', orBookings: 'e', hospitals: 'e', users: 'e' },
+  doctor: { overview: 'v', beds: 'v', blood: 'v', pharmacy: 'v', equipment: 'v', operatingRooms: 'v', orBookings: 'e', hospitals: 'v', users: '-' },
+  nurse: { overview: 'v', beds: 'e', blood: '-', pharmacy: 'v', equipment: 'e', operatingRooms: 'e', orBookings: 'e', hospitals: 'v', users: '-' },
+  bloodBank: { overview: 'v', beds: '-', blood: 'e', pharmacy: '-', equipment: '-', operatingRooms: '-', orBookings: '-', hospitals: 'v', users: '-' },
+  pharmacist: { overview: 'v', beds: '-', blood: '-', pharmacy: 'e', equipment: '-', operatingRooms: '-', orBookings: '-', hospitals: 'v', users: '-' },
 }
 
 describe('roles', () => {

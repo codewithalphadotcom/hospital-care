@@ -1,4 +1,7 @@
+from datetime import date
+
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,8 +9,14 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import module_permission
 from apps.resources.state_machine import TransitionNotAllowed
 
+from . import services
 from .models import OperatingRoom, OrCapability, OrStatus
-from .serializers import OperatingRoomActionSerializer, OperatingRoomSerializer
+from .serializers import (
+    OperatingRoomActionSerializer,
+    OperatingRoomSerializer,
+    OrBookingCreateSerializer,
+    OrBookingSerializer,
+)
 from .services import apply_operating_room_action, register_operating_room
 
 
@@ -53,3 +62,44 @@ class OperatingRoomActionView(APIView):
         except TransitionNotAllowed as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(OperatingRoomSerializer(room).data)
+
+
+class OperatingRoomScheduleView(APIView):
+    """GET /api/operating-rooms/schedule/?date=YYYY-MM-DD (default today, local time) → every room with that
+    day's bookings (story #29). Any role that can view operating rooms."""
+
+    permission_classes = [module_permission("operatingRooms")]
+
+    def get(self, request):
+        raw = request.query_params.get("date")
+        try:
+            day = date.fromisoformat(raw) if raw else timezone.localdate()
+        except ValueError:
+            return Response({"date": ["Use a date like 2026-11-17."]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(services.day_schedule(request.user, day))
+
+
+class OrBookingListView(APIView):
+    """POST /api/operating-rooms/bookings/ {roomId, startsAt, endsAt, procedure, surgeon?, patientInitials?} →
+    201 booking (orBookings: edit, so surgeons can book as well as nurses and admins)."""
+
+    permission_classes = [module_permission("orBookings")]
+
+    def post(self, request):
+        serializer = OrBookingCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        booking = services.book_operating_room(serializer.validated_data, actor=request.user)
+        return Response(OrBookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+
+
+class OrBookingCancelView(APIView):
+    """POST /api/operating-rooms/bookings/<id>/cancel/ → the booking, now cancelled. 409 if it already is."""
+
+    permission_classes = [module_permission("orBookings")]
+
+    def post(self, request, pk):
+        try:
+            booking = services.cancel_operating_booking(pk, actor=request.user)
+        except TransitionNotAllowed as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(OrBookingSerializer(booking).data)

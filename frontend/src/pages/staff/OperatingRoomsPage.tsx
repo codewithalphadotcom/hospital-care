@@ -12,12 +12,13 @@ import {
   type OrStatus,
 } from '../../api/operatingRooms'
 import { FormAlert } from '../../components/form/FormAlert'
+import { ButtonLink } from '../../components/form/Button'
 import { FilterBar, type FilterOption } from '../../components/ui/FilterBar'
 import { Panel } from '../../components/ui/Panel'
-import { StatusBadge, type Tone } from '../../components/ui/StatusBadge'
+import { StatusBadge } from '../../components/ui/StatusBadge'
 import bedStyles from '../../features/beds/Beds.module.css'
 import hospitalStyles from '../../features/hospitals/Hospitals.module.css'
-import { actionsFor } from '../../features/operatingRooms/operatingRooms'
+import { actionsFor, ROOM_TONE } from '../../features/operatingRooms/operatingRooms'
 import { RegisterOperatingRoomForm } from '../../features/operatingRooms/RegisterOperatingRoomForm'
 import { canEdit } from '../../features/staff/roles'
 import { useStaff } from '../../features/staff/staffContext'
@@ -28,13 +29,6 @@ import pageStyles from './StaffPages.module.css'
 type CapabilityFilter = 'all' | OrCapability
 type StatusFilter = 'all' | OrStatus
 
-const TONE: Record<OrStatus, Tone> = {
-  available: 'ok',
-  inUse: 'neutral',
-  cleaning: 'neutral',
-  maintenance: 'warning',
-  outOfService: 'critical',
-}
 const statusLabel = (s: OrStatus) => OR_STATUSES.find((x) => x.value === s)!.label
 const capabilityLabel = (c: OrCapability) => OR_CAPABILITIES.find((x) => x.value === c)!.label
 const capabilityOptions: readonly FilterOption<CapabilityFilter>[] = [{ value: 'all', label: 'All' }, ...OR_CAPABILITIES]
@@ -102,7 +96,14 @@ export default function OperatingRoomsPage() {
       <p role="status" className="visually-hidden">
         {announcement}
       </p>
-      <Panel title="Operating rooms">
+      <Panel
+        title="Operating rooms"
+        aside={
+          <ButtonLink to="/staff/operating-rooms/schedule" variant="secondary">
+            Day schedule
+          </ButtonLink>
+        }
+      >
         <div className={pageStyles.toolbar}>
           <FilterBar label="Show capability" options={capabilityOptions} value={capability} onChange={setCapability} />
           <FilterBar label="Show status" options={statusOptions} value={status} onChange={setStatus} />
@@ -134,7 +135,7 @@ export default function OperatingRoomsPage() {
                     </td>
                     <td>{room.location || '—'}</td>
                     <td>
-                      <StatusBadge tone={TONE[room.status]}>{statusLabel(room.status)}</StatusBadge>
+                      <StatusBadge tone={ROOM_TONE[room.status]}>{statusLabel(room.status)}</StatusBadge>
                     </td>
                     {editable && (
                       <td>

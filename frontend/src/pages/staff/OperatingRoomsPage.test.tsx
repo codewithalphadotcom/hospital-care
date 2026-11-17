@@ -97,6 +97,13 @@ describe('OperatingRoomsPage (story #28 Operating room registry)', () => {
     expect(within(row).getByRole('button', { name: 'Finish case OR 1' })).toBeInTheDocument()
   })
 
+  it('links to the day schedule', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/operating-rooms')
+    await table()
+    expect(screen.getByRole('link', { name: 'Day schedule' })).toHaveAttribute('href', '/staff/operating-rooms/schedule')
+  })
+
   it('offers only the moves allowed from the current status', async () => {
     mockStaffApi({ role: 'admin' })
     renderStaff('/staff/operating-rooms')
