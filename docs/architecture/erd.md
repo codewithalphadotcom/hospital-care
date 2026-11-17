@@ -190,7 +190,7 @@ erDiagram
         bigint id PK
         bigint hospital_id FK
         bigint created_by_id FK
-        string severity "critical|urgent|routine"
+        string severity "critical|high|moderate|low"
         string status "open|matching|partiallyFulfilled|fulfilled|escalated|closed|cancelled"
         string outcome_note "required to close"
         datetime escalate_after

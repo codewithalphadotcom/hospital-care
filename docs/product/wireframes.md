@@ -118,7 +118,7 @@ Each ward header shows "⚠ At or above 90%" when its occupancy reaches `occupan
 
 ```
 ┌ NEW EMERGENCY REQUEST
-│ Severity*        (•) Critical  ( ) Urgent  ( ) Routine
+│ Severity*        (•) Critical  ( ) High  ( ) Moderate  ( ) Low
 │ Needed*          [Blood ▾]  Group* [O- ▾]  Component* [Red cells ▾]  Quantity* [4]
 │                  + Add another requirement (bed, equipment…)
 │ Patient ref      [__________] (optional, no names)

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Case, Value, When
 
 
 class ErStatus(models.TextChoices):
@@ -32,9 +33,12 @@ class EmergencyStatus(models.Model):
 
 
 class Severity(models.TextChoices):
+    """Most severe first. The order here is the order lists sort by (see `by_priority`)."""
+
     CRITICAL = "critical", "Critical"
-    URGENT = "urgent", "Urgent"
-    ROUTINE = "routine", "Routine"
+    HIGH = "high", "High"
+    MODERATE = "moderate", "Moderate"
+    LOW = "low", "Low"
 
 
 class RequestStatus(models.TextChoices):
@@ -47,6 +51,17 @@ class RequestStatus(models.TextChoices):
     ESCALATED = "escalated", "Escalated"
     CLOSED = "closed", "Closed"
     CANCELLED = "cancelled", "Cancelled"
+
+
+class EmergencyRequestQuerySet(models.QuerySet):
+    def by_priority(self):
+        """Most severe first, then the case waiting longest (oldest), then id so the order is stable."""
+        rank = Case(
+            *[When(severity=level, then=Value(i)) for i, level in enumerate(Severity.values)],
+            default=Value(len(Severity.values)),
+            output_field=models.PositiveSmallIntegerField(),
+        )
+        return self.annotate(priority=rank).order_by("priority", "created_at", "id")
 
 
 class EmergencyRequest(models.Model):
@@ -65,6 +80,8 @@ class EmergencyRequest(models.Model):
         max_length=30, blank=True, help_text="Optional bed or triage tag. Never a name."
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = EmergencyRequestQuerySet.as_manager()
 
     class Meta:
         ordering = ["-created_at", "-id"]

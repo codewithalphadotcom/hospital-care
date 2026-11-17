@@ -113,14 +113,14 @@ at a hospital see only its cases (another hospital's case → **404**); staff wi
 
 | Method | Path | Body | Success | Story |
 |---|---|---|---|---|
-| GET | `/emergencies/` | – | `EmergencyCase[]`, newest first | #30 |
-| POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #32 |
+| GET | `/emergencies/` | – | `EmergencyCase[]`, most severe first, then oldest first | #30, #31 |
+| POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
 | GET | `/emergencies/<id>/` | – | `EmergencyCase` | #30 |
 
 ```ts
 EmergencyCase = {
   id: string,                   // "EC-2026-0001": sequential per year
-  severity: 'critical' | 'urgent' | 'routine',
+  severity: 'critical' | 'high' | 'moderate' | 'low',  // most severe first
   status: 'open' | 'matching' | 'partiallyFulfilled' | 'fulfilled' | 'escalated' | 'closed' | 'cancelled',
   patientRef: string,           // optional bed/triage tag, ≤ 30 chars; never a name
   hospital: { id: number, name: string } | null,
@@ -135,6 +135,10 @@ RequestItem = { type: 'blood', group: BloodGroup, component: Component, quantity
 
 - A new case is always `open`, at the creator's hospital, and audit-logged (`emergencyrequest.created`).
   Moving between statuses arrives with #34.
+- **Severity (#31):** `critical`, `high`, `moderate`, `low`. The list is sorted by severity, then by age with the oldest
+  case first within a level (the case waiting longest is handled first). The server does the sort; clients render
+  the order they receive. Ties (same severity and time) fall back to id. Cases from before #31 were renamed:
+  `urgent` → `high`, `routine` → `moderate`.
 - No patient-identifying data is collected: `patientRef` is optional.
 - Errors on one need come back keyed by its position: `{"items": {"0": {"quantity": ["..."]}}}`. An empty or
   over-long list is `{"items": ["..."]}`.

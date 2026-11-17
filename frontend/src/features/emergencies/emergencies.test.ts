@@ -27,8 +27,8 @@ describe('emergency case form rules (#30, #32)', () => {
 
   it('needs a severity but no patient data on step 1', () => {
     expect(validateCaseStep(emptyCase())).toEqual({ severity: 'Choose how severe the case is' })
-    expect(validateCaseStep({ ...emptyCase(), severity: 'routine' })).toEqual({})
-    expect(validateCaseStep({ ...emptyCase(), severity: 'routine', patientRef: 'x'.repeat(31) }).patientRef).toBe('Use at most 30 characters')
+    expect(validateCaseStep({ ...emptyCase(), severity: 'moderate' })).toEqual({})
+    expect(validateCaseStep({ ...emptyCase(), severity: 'moderate', patientRef: 'x'.repeat(31) }).patientRef).toBe('Use at most 30 characters')
   })
 
   it('checks every quantity against its type’s limit on step 2', () => {

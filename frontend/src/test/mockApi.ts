@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import type { User } from '../api/auth'
 import type { BedAction, BedBoard } from '../api/beds'
-import type { CaseInput, EmergencyCase } from '../api/emergencies'
+import type { CaseInput, EmergencyCase, Severity } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
@@ -55,6 +55,12 @@ export function mockApi(routes: Record<string, Route>) {
     return new Response(JSON.stringify({ detail: 'Not found' }), { status: 404 })
   })
 }
+
+const SEVERITY_RANK: Record<Severity, number> = { critical: 0, high: 1, moderate: 2, low: 3 }
+
+/** The order the server lists cases in: most severe first, then the oldest case first (story #31). */
+const byPriority = (a: EmergencyCase, b: EmergencyCase) =>
+  SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.createdAt.localeCompare(b.createdAt)
 
 /** What the server fills in for a new structure item. */
 const STRUCTURE_DEFAULTS: Record<StructureKind, Record<string, unknown>> = {
@@ -195,7 +201,8 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
         createdAt: new Date().toISOString(),
         items: input.items,
       }
-      cases.unshift(created)
+      cases.push(created)
+      cases.sort(byPriority)
       return { status: 201, body: created }
     }),
 

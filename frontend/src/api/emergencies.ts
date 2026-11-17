@@ -2,7 +2,8 @@ import type { BedType } from './beds'
 import type { BloodGroup, Component } from './blood'
 import { apiGet, apiPost } from './client'
 
-export type Severity = 'critical' | 'urgent' | 'routine'
+/** Most severe first. Lists come from the server in this order: severity, then the oldest case first (story #31). */
+export type Severity = 'critical' | 'high' | 'moderate' | 'low'
 export type CaseStatus = 'open' | 'matching' | 'partiallyFulfilled' | 'fulfilled' | 'escalated' | 'closed' | 'cancelled'
 
 export type BloodNeed = { type: 'blood'; group: BloodGroup; component: Component; quantity: number }
@@ -31,8 +32,9 @@ export interface CaseInput {
 
 export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[] = [
   { id: 'critical', label: 'Critical', hint: 'Life-threatening: needed within the hour' },
-  { id: 'urgent', label: 'Urgent', hint: 'Needed within a few hours' },
-  { id: 'routine', label: 'Routine', hint: 'Can be planned' },
+  { id: 'high', label: 'High', hint: 'Serious: needed within a few hours' },
+  { id: 'moderate', label: 'Moderate', hint: 'Needed today; can be planned' },
+  { id: 'low', label: 'Low', hint: 'Can wait; handled after the rest' },
 ]
 
 export const STATUS_LABEL: Record<CaseStatus, string> = {
@@ -50,7 +52,7 @@ export const MAX_NEEDS = 10
 export const MAX_QUANTITY: Record<Need['type'], number> = { blood: 20, bed: 5 }
 export const MAX_PATIENT_REF = 30
 
-/** Cases at the user's hospital, newest first. GET /api/emergencies/ (emergencies: view). */
+/** Cases at the user's hospital, most severe first, then oldest first. GET /api/emergencies/ (emergencies: view). */
 export function getCases(): Promise<EmergencyCase[]> {
   return apiGet<EmergencyCase[]>('/emergencies/')
 }

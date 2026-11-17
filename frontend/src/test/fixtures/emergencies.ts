@@ -1,6 +1,6 @@
 import type { EmergencyCase } from '../../api/emergencies'
 
-/** Two cases at CityCare General, newest first. Fresh copies every call. */
+/** Two cases at CityCare General, in the order the server lists them. Fresh copies every call. */
 export function sampleCases(now: Date): EmergencyCase[] {
   const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString()
   const hospital = { id: 1, name: 'CityCare General Hospital' }
@@ -20,7 +20,7 @@ export function sampleCases(now: Date): EmergencyCase[] {
     },
     {
       id: 'EC-2026-0001',
-      severity: 'routine',
+      severity: 'moderate',
       status: 'open',
       patientRef: '',
       hospital,

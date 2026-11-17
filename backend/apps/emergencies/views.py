@@ -40,13 +40,13 @@ class PublicStatusView(APIView):
 
 
 class CaseListView(APIView):
-    """GET /api/emergencies/ → the user's hospital's cases, newest first (every case for staff without one).
-    POST opens a case with its needs (stories #30, #32; emergencies: edit)."""
+    """GET /api/emergencies/ → the user's hospital's cases, most severe first, then oldest first (every case
+    for staff without one). POST opens a case with its needs (stories #30, #32; emergencies: edit)."""
 
     permission_classes = [module_permission("emergencies")]
 
     def get(self, request):
-        cases = own_hospital(case_queryset(), request.user)
+        cases = own_hospital(case_queryset(), request.user).by_priority()
         return Response(CaseSerializer(cases, many=True).data)
 
     def post(self, request):

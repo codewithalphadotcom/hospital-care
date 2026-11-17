@@ -100,7 +100,7 @@
   border-left-color: var(--status-critical);
 }
 
-.severity[data-severity='urgent'] {
+.severity[data-severity='high'] {
   border-left-color: var(--status-warning);
 }
 
@@ -232,4 +232,13 @@
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   white-space: nowrap;
+}
+
+/* A critical case is marked by its "Critical" label and by shape (a thick left edge), with a tint on top. */
+.critical > td {
+  background: color-mix(in srgb, var(--status-critical) 7%, var(--surface));
+}
+
+.critical > td:first-child {
+  box-shadow: inset var(--stripe) 0 0 var(--status-critical);
 }

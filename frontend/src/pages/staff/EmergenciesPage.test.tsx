@@ -1,12 +1,24 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { EmergencyCase, Severity } from '../../api/emergencies'
 import { fail, mockApi, mockStaffApi, userFor } from '../../test/mockApi'
 import { renderStaff } from '../../test/renderStaff'
 
 afterEach(() => vi.restoreAllMocks())
 
-const table = () => screen.findByRole('table', { name: 'Emergency cases, newest first' })
+const caseFor = (id: string, severity: Severity): EmergencyCase => ({
+  id,
+  severity,
+  status: 'open',
+  patientRef: '',
+  hospital: null,
+  createdBy: 'Hina Javed',
+  createdAt: new Date().toISOString(),
+  items: [{ type: 'bed', bedType: 'icu', quantity: 1 }],
+})
+
+const table = () => screen.findByRole('table', { name: 'Emergency cases, most severe first, then oldest first' })
 const references = async () =>
   within(await table())
     .getAllByRole('row')
@@ -21,7 +33,7 @@ async function openForm() {
 const next = () => userEvent.click(screen.getByRole('button', { name: 'Next' }))
 
 describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
-  it('lists the hospital’s cases, newest first, with what they need', async () => {
+  it('lists the hospital’s cases with what they need', async () => {
     mockStaffApi({ role: 'bloodBank' })
     renderStaff('/staff/emergencies')
     expect(await references()).toEqual(['EC-2026-0002Bay 4', 'EC-2026-0001'])
@@ -29,6 +41,23 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     expect(within(row).getByText('Critical')).toBeInTheDocument()
     expect(within(row).getByText('4 × O− red cells, 1 × ICU bed')).toBeInTheDocument()
     expect(within(row).getByText('Open')).toBeInTheDocument()
+  })
+
+  it('shows cases in the order the server sends them, without re-sorting (#31)', async () => {
+    // Deliberately not severity order: the page shows what it is given.
+    mockStaffApi({ role: 'nurse', cases: [caseFor('EC-2026-0004', 'low'), caseFor('EC-2026-0001', 'critical'), caseFor('EC-2026-0003', 'moderate')] })
+    renderStaff('/staff/emergencies')
+    expect(await references()).toEqual(['EC-2026-0004', 'EC-2026-0001', 'EC-2026-0003'])
+  })
+
+  it('marks a critical case with its label, and gives every level its own label (#31)', async () => {
+    mockStaffApi({ role: 'nurse', cases: [caseFor('EC-2026-0001', 'critical'), caseFor('EC-2026-0002', 'high'), caseFor('EC-2026-0003', 'moderate'), caseFor('EC-2026-0004', 'low')] })
+    renderStaff('/staff/emergencies')
+    const rows = within(await table()).getAllByRole('row').slice(1)
+    const labels = rows.map((row) => within(row).getAllByRole('cell')[1].textContent)
+    expect(labels).toEqual(['Critical', 'High', 'Moderate', 'Low'])
+    expect(within(rows[0]).getByText('Critical')).toBeInTheDocument()
+    expect(within(rows[1]).queryByText('Critical')).toBeNull()
   })
 
   it('lets doctors, nurses and admins open cases, but not other staff', async () => {
@@ -77,7 +106,8 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     expect(await screen.findByText('Case EC-2026-0003 is open.')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'New emergency case' })).toBeNull()
     expect(screen.getByRole('button', { name: 'New case' })).toHaveFocus()
-    expect((await references())[0]).toBe('EC-2026-0003')
+    // The new critical case sorts after the older critical one: the list is reloaded from the server.
+    await waitFor(async () => expect(await references()).toEqual(['EC-2026-0002Bay 4', 'EC-2026-0003', 'EC-2026-0001']))
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
     expect(JSON.parse(String(post[1]!.body))).toEqual({
       severity: 'critical',
@@ -89,6 +119,16 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     })
   })
 
+  it('offers the four severity levels, most severe first (#31)', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/emergencies')
+    const form = await openForm()
+    const levels = within(form)
+      .getAllByRole('radio')
+      .map((radio) => radio.closest('label')?.querySelector('strong')?.textContent)
+    expect(levels).toEqual(['Critical', 'High', 'Moderate', 'Low'])
+  })
+
   it('won’t move on until each step is valid', async () => {
     mockStaffApi({ role: 'nurse' })
     renderStaff('/staff/emergencies')
@@ -97,7 +137,7 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     await next()
     expect(within(form).getByText('Choose how severe the case is')).toBeInTheDocument()
     expect(within(form).getByRole('heading', { name: 'Step 1 of 3: Case' })).toBeInTheDocument()
-    await userEvent.click(within(form).getByRole('radio', { name: /Urgent/ }))
+    await userEvent.click(within(form).getByRole('radio', { name: /High/ }))
     await next()
 
     const units = within(form).getByLabelText('Units')
@@ -108,14 +148,14 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     expect(units).toHaveFocus()
 
     await userEvent.click(within(form).getByRole('button', { name: 'Back' }))
-    expect(within(form).getByRole('radio', { name: /Urgent/ })).toBeChecked()
+    expect(within(form).getByRole('radio', { name: /High/ })).toBeChecked()
   })
 
   it('shows what went wrong when the server refuses the case', async () => {
     mockStaffApi({ role: 'doctor' })
     renderStaff('/staff/emergencies')
     const form = await openForm()
-    await userEvent.click(within(form).getByRole('radio', { name: /Routine/ }))
+    await userEvent.click(within(form).getByRole('radio', { name: /Moderate/ }))
     await next()
     await next()
 

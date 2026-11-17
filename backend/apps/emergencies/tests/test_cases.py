@@ -43,7 +43,7 @@ def test_a_new_case_is_open_with_a_unique_reference_and_its_needs(client_as, mak
 
 
 def test_no_patient_identifying_data_is_needed(client_as):
-    res = create(client_as(Role.NURSE), {"severity": "routine", "items": [BED]})
+    res = create(client_as(Role.NURSE), {"severity": "moderate", "items": [BED]})
     assert res.status_code == 201 and res.json()["patientRef"] == ""
 
 
@@ -61,11 +61,11 @@ def test_opening_a_case_is_audit_logged(client_as):
 
 
 def test_references_continue_from_the_years_highest_and_restart_each_year():
-    EmergencyRequest.objects.create(reference=f"EC-{year()}-0041", severity="urgent")
-    EmergencyRequest.objects.create(reference=f"EC-{year() - 1}-0900", severity="urgent")
+    EmergencyRequest.objects.create(reference=f"EC-{year()}-0041", severity="high")
+    EmergencyRequest.objects.create(reference=f"EC-{year() - 1}-0900", severity="high")
     assert next_reference(year()) == f"EC-{year()}-0042"
     assert next_reference(year() + 1) == f"EC-{year() + 1}-0001"
-    EmergencyRequest.objects.create(reference=f"EC-{year()}-9999", severity="urgent")
+    EmergencyRequest.objects.create(reference=f"EC-{year()}-9999", severity="high")
     assert next_reference(year()) == f"EC-{year()}-10000"  # grows past 4 digits instead of wrapping
 
 
@@ -101,13 +101,13 @@ def test_a_case_needs_a_severity_and_one_to_ten_needs(client_as, body, field):
     ],
 )
 def test_each_need_is_validated_for_its_type(client_as, item, field):
-    res = create(client_as(Role.DOCTOR), {"severity": "urgent", "items": [item]})
+    res = create(client_as(Role.DOCTOR), {"severity": "high", "items": [item]})
     assert res.status_code == 400
     assert field in res.json()["items"]["0"]  # DRF keys nested list errors by index
 
 
 def test_a_bed_need_ignores_blood_fields_sent_with_it(client_as):
-    create(client_as(Role.DOCTOR), {"severity": "urgent", "items": [{**BED, "group": "O-"}]})
+    create(client_as(Role.DOCTOR), {"severity": "high", "items": [{**BED, "group": "O-"}]})
     item = RequestItem.objects.get()
     assert (item.resource_type, item.bed_type, item.blood_group, item.fulfilled) == ("bed", "icu", "", 0)
 
@@ -147,8 +147,8 @@ def test_staff_see_only_their_own_hospitals_cases(client_as, make_user, make_hos
     assert here.get(reverse("emergency-case", args=[mine])).status_code == 200
     assert here.get(reverse("emergency-case", args=[other])).status_code == 404
 
-    admin = client_as(Role.ADMIN)  # no hospital: the whole network, newest first
-    assert [c["id"] for c in admin.get(reverse("emergency-cases")).json()] == [other, mine]
+    admin = client_as(Role.ADMIN)  # no hospital: the whole network; both are critical, so oldest first
+    assert [c["id"] for c in admin.get(reverse("emergency-cases")).json()] == [mine, other]
 
 
 def test_the_list_is_fresh_on_every_request(client_as):

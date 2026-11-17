@@ -13,9 +13,9 @@ import { useLoad } from '../../lib/useLoad'
 import { StaffDataState } from './StaffDataState'
 import pageStyles from './StaffPages.module.css'
 
-const SEVERITY_TONE: Record<Severity, Tone> = { critical: 'critical', urgent: 'warning', routine: 'neutral' }
+const SEVERITY_TONE: Record<Severity, Tone> = { critical: 'critical', high: 'warning', moderate: 'neutral', low: 'neutral' }
 
-/** Emergency cases at the user's hospital, and opening a new one (stories #30, #32). */
+/** Emergency cases at the user's hospital, and opening a new one (stories #30, #32). The server orders the list (#31). */
 export default function EmergenciesPage() {
   const { role } = useStaff()
   const { result, setData } = useLoad(getCases)
@@ -34,10 +34,16 @@ export default function EmergenciesPage() {
 
   const editable = canEdit(role, 'emergencies')
 
-  function handleCreated(created: EmergencyCase) {
-    setData((cases) => [created, ...cases])
+  async function handleCreated(created: EmergencyCase) {
     setCreating(false)
     setOpened(created.id)
+    // Take the server's order (severity, then age) rather than placing the new case here.
+    try {
+      const cases = await getCases()
+      setData(() => cases)
+    } catch {
+      // The case is open either way; the list catches up on the next visit.
+    }
   }
 
   return (
@@ -68,7 +74,7 @@ export default function EmergenciesPage() {
         ) : (
           <div className="table-scroll">
             <table className={styles.table}>
-              <caption className="visually-hidden">Emergency cases, newest first</caption>
+              <caption className="visually-hidden">Emergency cases, most severe first, then oldest first</caption>
               <thead>
                 <tr>
                   <th scope="col">Case</th>
@@ -94,7 +100,7 @@ export default function EmergenciesPage() {
 function CaseRow({ item }: { item: EmergencyCase }) {
   const opened = new Date(item.createdAt)
   return (
-    <tr>
+    <tr className={item.severity === 'critical' ? styles.critical : undefined}>
       <td>
         <span className={styles.reference}>{item.id}</span>
         {item.patientRef && <div className={styles.hint}>{item.patientRef}</div>}
