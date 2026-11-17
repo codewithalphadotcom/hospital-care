@@ -68,6 +68,34 @@ export interface Candidate {
   earliestExpiry?: string
   /** Blood only: 0 is the identical group; higher is a compatible substitute. */
   bestDonorRank?: number
+  /** 1-based position in the item's list (story #41). */
+  rank: number
+  score: Score
+  /** True only on rank 1, and only when its score is above 0. */
+  recommended: boolean
+}
+
+/** One factor of a score (story #41): how well the candidate does on it, and what that is worth. */
+export interface ScoreFactor {
+  name: 'distance' | 'expiry' | 'quantity' | 'compatibility'
+  /** "Distance", "Expiry", "Stock" or "Blood group match". */
+  label: string
+  /** 0 to 1, two decimals. */
+  value: number
+  /** This factor's share of the strategy's weights, 0 to 1, two decimals. */
+  weight: number
+  /** One decimal, out of 100. The factors' points add up to the score's total. */
+  points: number
+  /** The reason in plain words: "4.2 km, about 6 min", "expires in 3 days", "identical group". */
+  detail: string
+}
+
+/** How a candidate scored under its item's strategy (story #41). `total` is 0 to 100, one decimal. */
+export interface Score {
+  total: number
+  /** The strategy's name, as in `CandidateItem.strategy.name`. */
+  strategy: string
+  factors: ScoreFactor[]
 }
 
 /** One short requirement and the hospitals that can supply it. Shape of `CandidateItemSerializer`. */
@@ -76,7 +104,9 @@ export interface CandidateItem {
   /** A label such as "O- red cells", "ICU bed", "Ventilator" or "Cardiac operating room". */
   need: string
   shortfall: number
-  /** Covering first, then nearest, then hospital id. */
+  /** How the candidates are ordered, for people to read: "Earliest expiry first", "Nearest first". */
+  strategy: { name: string; label: string }
+  /** Best first, as the server ranks them. The client keeps this order. */
   candidates: Candidate[]
 }
 

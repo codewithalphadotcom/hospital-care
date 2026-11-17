@@ -100,15 +100,19 @@ export function sampleNewNeedsCase(now: Date): EmergencyCase {
 }
 
 /**
- * The sources for the sample cases (story #38), as the server returns them: only the short needs. EC-2026-0002 is
- * short of blood and an ICU bed: one hospital has 5 O− red cells, which covers it, and one has 1, which doesn't. No
- * other hospital has an ICU bed. EC-2026-0003 is short of one ventilator and a cardiac theatre; one hospital has a
- * ventilator and nobody has a cardiac theatre free. EC-2026-0001 is covered locally, so it has no items.
+ * The sources for the sample cases (stories #38 and #41), as the server returns them: only the short needs, ranked.
+ * EC-2026-0002 is short of blood and an ICU bed. For the blood, Riverside has 5 O− red cells expiring in 9 days, which
+ * covers it, and scores 87.6, so it is recommended; Northside has 1, expiring in 3 days, with no known distance, and
+ * scores 69.7. No other hospital has an ICU bed. EC-2026-0003 is short of one ventilator and a cardiac theatre; Riverside
+ * has a ventilator and scores 94.1 on nearest-first, and nobody has a cardiac theatre free. EC-2026-0001 is covered
+ * locally, so it has no items.
  */
 export function sampleCandidates(now: Date): Record<string, CandidatesResponse> {
   const expiresIn = (days: number) => new Date(now.getTime() + days * 86_400_000).toISOString()
   const riverside = { id: 2, name: 'Riverside Medical Centre' }
   const northside = { id: 3, name: "Northside Children's Hospital" }
+  const earliestExpiry = { name: 'earliestExpiry', label: 'Earliest expiry first' }
+  const nearest = { name: 'nearest', label: 'Nearest first' }
   return {
     'EC-2026-0002': {
       reference: 'EC-2026-0002',
@@ -117,12 +121,53 @@ export function sampleCandidates(now: Date): Record<string, CandidatesResponse> 
           itemId: 1,
           need: 'O- red cells',
           shortfall: 3,
+          strategy: earliestExpiry,
           candidates: [
-            { hospital: riverside, available: 5, covers: true, distanceKm: 4.2, travelMinutes: 6, earliestExpiry: expiresIn(9), bestDonorRank: 0 },
-            { hospital: northside, available: 1, covers: false, distanceKm: null, travelMinutes: null, earliestExpiry: expiresIn(3), bestDonorRank: 0 },
+            {
+              hospital: riverside,
+              available: 5,
+              covers: true,
+              distanceKm: 4.2,
+              travelMinutes: 6,
+              earliestExpiry: expiresIn(9),
+              bestDonorRank: 0,
+              rank: 1,
+              recommended: true,
+              score: {
+                total: 87.6,
+                strategy: 'earliestExpiry',
+                factors: [
+                  { name: 'expiry', label: 'Expiry', value: 0.79, weight: 0.5, points: 39.3, detail: 'expires in 9 days' },
+                  { name: 'compatibility', label: 'Blood group match', value: 1, weight: 0.2, points: 20, detail: 'identical group' },
+                  { name: 'distance', label: 'Distance', value: 0.92, weight: 0.2, points: 18.3, detail: '4.2 km, about 6 min' },
+                  { name: 'quantity', label: 'Stock', value: 1, weight: 0.1, points: 10, detail: '5 available, 3 needed' },
+                ],
+              },
+            },
+            {
+              hospital: northside,
+              available: 1,
+              covers: false,
+              distanceKm: null,
+              travelMinutes: null,
+              earliestExpiry: expiresIn(3),
+              bestDonorRank: 0,
+              rank: 2,
+              recommended: false,
+              score: {
+                total: 69.7,
+                strategy: 'earliestExpiry',
+                factors: [
+                  { name: 'expiry', label: 'Expiry', value: 0.93, weight: 0.5, points: 46.4, detail: 'expires in 3 days' },
+                  { name: 'compatibility', label: 'Blood group match', value: 1, weight: 0.2, points: 20, detail: 'identical group' },
+                  { name: 'distance', label: 'Distance', value: 0, weight: 0.2, points: 0, detail: 'distance unknown' },
+                  { name: 'quantity', label: 'Stock', value: 0.33, weight: 0.1, points: 3.3, detail: '1 available, 3 needed' },
+                ],
+              },
+            },
           ],
         },
-        { itemId: 2, need: 'ICU bed', shortfall: 1, candidates: [] },
+        { itemId: 2, need: 'ICU bed', shortfall: 1, strategy: nearest, candidates: [] },
       ],
     },
     'EC-2026-0003': {
@@ -132,9 +177,28 @@ export function sampleCandidates(now: Date): Record<string, CandidatesResponse> 
           itemId: 3,
           need: 'Ventilator',
           shortfall: 1,
-          candidates: [{ hospital: riverside, available: 2, covers: true, distanceKm: 4.2, travelMinutes: 6 }],
+          strategy: nearest,
+          candidates: [
+            {
+              hospital: riverside,
+              available: 2,
+              covers: true,
+              distanceKm: 4.2,
+              travelMinutes: 6,
+              rank: 1,
+              recommended: true,
+              score: {
+                total: 94.1,
+                strategy: 'nearest',
+                factors: [
+                  { name: 'distance', label: 'Distance', value: 0.92, weight: 0.7, points: 64.1, detail: '4.2 km, about 6 min' },
+                  { name: 'quantity', label: 'Stock', value: 1, weight: 0.3, points: 30, detail: '2 available, 1 needed' },
+                ],
+              },
+            },
+          ],
         },
-        { itemId: 4, need: 'Cardiac operating room', shortfall: 1, candidates: [] },
+        { itemId: 4, need: 'Cardiac operating room', shortfall: 1, strategy: nearest, candidates: [] },
       ],
     },
     'EC-2026-0001': { reference: 'EC-2026-0001', items: [] },
