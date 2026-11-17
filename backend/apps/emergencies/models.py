@@ -3,6 +3,8 @@ from django.db import models
 from django.db.models import Case, Value, When
 from django.utils import timezone
 
+from apps.equipment.models import EquipmentType
+from apps.operating_rooms.models import OrCapability
 from apps.resources.state_machine import StateMachine
 
 
@@ -139,20 +141,25 @@ class RequestStatusChange(models.Model):
 
 
 class ResourceType(models.TextChoices):
-    """What a case can ask for. Equipment and operating rooms join when they exist (#26, #28)."""
+    """What a case can ask for: blood, beds (#32), equipment (#26) and operating rooms (#28)."""
 
     BLOOD = "blood", "Blood"
     BED = "bed", "Bed"
+    EQUIPMENT = "equipment", "Equipment"
+    OPERATING_ROOM = "operatingRoom", "Operating room"
 
 
 class RequestItem(models.Model):
-    """One thing a case needs (story #32): blood of a group and component, or beds of a type."""
+    """One thing a case needs (story #32): blood, beds, equipment or operating rooms. Only the field of the
+    item's own type is set; the others stay blank."""
 
     request = models.ForeignKey(EmergencyRequest, on_delete=models.CASCADE, related_name="items")
-    resource_type = models.CharField(max_length=10, choices=ResourceType.choices)
+    resource_type = models.CharField(max_length=20, choices=ResourceType.choices)
     blood_group = models.CharField(max_length=3, blank=True)
     component = models.CharField(max_length=10, blank=True)
     bed_type = models.CharField(max_length=12, blank=True)
+    equipment_type = models.CharField(max_length=20, blank=True, choices=EquipmentType.choices)
+    capability = models.CharField(max_length=12, blank=True, choices=OrCapability.choices)
     quantity = models.PositiveSmallIntegerField()
     fulfilled = models.PositiveSmallIntegerField(default=0, help_text="Filled in by allocation (#45).")
 
@@ -169,9 +176,10 @@ class RequestItem(models.Model):
         ]
 
     def __str__(self):
-        what = (
-            f"{self.blood_group} {self.component}"
-            if self.resource_type == ResourceType.BLOOD
-            else self.bed_type
-        )
+        what = {
+            ResourceType.BLOOD: f"{self.blood_group} {self.component}",
+            ResourceType.BED: self.bed_type,
+            ResourceType.EQUIPMENT: self.equipment_type,
+            ResourceType.OPERATING_ROOM: self.capability,
+        }[self.resource_type]
         return f"{self.request_id}: {self.quantity} × {what}"

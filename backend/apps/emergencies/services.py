@@ -45,6 +45,18 @@ def next_reference(year: int) -> str:
     return f"{prefix}{max(numbers, default=0) + 1:04d}"
 
 
+def _need_fields(item: dict) -> dict:
+    """The stored fields of one validated need: its own type's field only, the others stay blank."""
+    kind = item["type"]
+    if kind == ResourceType.BLOOD:
+        return {"resource_type": kind, "blood_group": item["group"], "component": item["component"]}
+    if kind == ResourceType.BED:
+        return {"resource_type": kind, "bed_type": item["bedType"]}
+    if kind == ResourceType.EQUIPMENT:
+        return {"resource_type": kind, "equipment_type": item["equipmentType"]}
+    return {"resource_type": kind, "capability": item["capability"]}
+
+
 @transaction.atomic
 def create_case(*, severity: str, patient_ref: str, items: list[dict], actor) -> EmergencyRequest:
     """
@@ -70,15 +82,7 @@ def create_case(*, severity: str, patient_ref: str, items: list[dict], actor) ->
         request=case, from_status="", to_status=case.status, action="create", actor=actor
     )
     RequestItem.objects.bulk_create(
-        RequestItem(
-            request=case,
-            resource_type=item["type"],
-            blood_group=item.get("group", "") if item["type"] == ResourceType.BLOOD else "",
-            component=item.get("component", "") if item["type"] == ResourceType.BLOOD else "",
-            bed_type=item.get("bedType", "") if item["type"] == ResourceType.BED else "",
-            quantity=item["quantity"],
-        )
-        for item in items
+        RequestItem(request=case, quantity=item["quantity"], **_need_fields(item)) for item in items
     )
     record(
         actor,
