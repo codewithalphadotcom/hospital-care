@@ -13,7 +13,9 @@ from apps.accounts.models import Role
 from apps.blood.models import BloodUnit, UnitStatus
 from apps.emergencies.availability import local_availability, shortfall_items
 from apps.emergencies.models import EmergencyRequest, RequestItem
+from apps.equipment.models import Equipment, EquipmentStatus
 from apps.hospitals.models import Bed, BedStatus, Ward
+from apps.operating_rooms.models import OperatingRoom, OrStatus
 
 pytestmark = pytest.mark.django_db
 
@@ -41,13 +43,38 @@ def make_bed(hospital, bed_type="icu", status=BedStatus.FREE):
     return Bed.objects.create(ward=ward, label=f"B{next(_numbers)}", bed_type=bed_type, status=status)
 
 
+def make_equipment(hospital, equipment_type="ventilator", status=EquipmentStatus.AVAILABLE):
+    return Equipment.objects.create(
+        hospital=hospital,
+        identifier=f"EQ-{next(_numbers)}",
+        equipment_type=equipment_type,
+        location="ICU",
+        status=status,
+    )
+
+
+def make_room(hospital, capabilities=("cardiac",), status=OrStatus.AVAILABLE):
+    return OperatingRoom.objects.create(
+        hospital=hospital,
+        name=f"Theatre {next(_numbers)}",
+        capabilities=list(capabilities),
+        location="Block B",
+        status=status,
+    )
+
+
 def make_case(hospital, *needs, reference="EC-2026-0001"):
-    """Each need is (kind, quantity, fulfilled). Kind is "O-/redCells" for blood, or a bed type like "icu"."""
+    """Each need is (kind, quantity, fulfilled). Kind is "O-/redCells" for blood, "equipment:ventilator" for
+    equipment, "room:cardiac" for an operating room, or a bed type like "icu"."""
     case = EmergencyRequest.objects.create(reference=reference, severity="high", hospital=hospital)
     for kind, quantity, fulfilled in needs:
         if "/" in kind:
             group, component = kind.split("/")
             fields = {"resource_type": "blood", "blood_group": group, "component": component}
+        elif kind.startswith("equipment:"):
+            fields = {"resource_type": "equipment", "equipment_type": kind.removeprefix("equipment:")}
+        elif kind.startswith("room:"):
+            fields = {"resource_type": "operatingRoom", "capability": kind.removeprefix("room:")}
         else:
             fields = {"resource_type": "bed", "bed_type": kind}
         RequestItem.objects.create(request=case, quantity=quantity, fulfilled=fulfilled, **fields)
@@ -57,7 +84,11 @@ def make_case(hospital, *needs, reference="EC-2026-0001"):
 def figures(case):
     """(need, available, shortfall) for each requirement, in order."""
     return [
-        (row.item.blood_group or row.item.bed_type, row.available, row.shortfall)
+        (
+            row.item.blood_group or row.item.bed_type or row.item.equipment_type or row.item.capability,
+            row.available,
+            row.shortfall,
+        )
         for row in local_availability(case)
     ]
 
@@ -105,6 +136,57 @@ def test_beds_count_only_free_beds_of_the_type_at_this_hospital(make_hospital):
     case = make_case(here, ("icu", 3, 0), ("general", 1, 0))
 
     assert figures(case) == [("icu", 2, 1), ("general", 1, 0)]
+
+
+# ── Equipment and operating rooms (#32, completed in #38) ──────────────────────────────────────
+
+
+def test_equipment_counts_only_available_equipment_of_the_type_at_this_hospital(make_hospital):
+    here, there = make_hospital(name="Here"), make_hospital(name="There")
+    make_equipment(here, "ventilator")
+    make_equipment(here, "ventilator")
+    for status in (EquipmentStatus.IN_USE, EquipmentStatus.MAINTENANCE, EquipmentStatus.OUT_OF_SERVICE):
+        make_equipment(here, "ventilator", status=status)
+    make_equipment(here, "monitor")  # available, but another type
+    make_equipment(there, "ventilator")  # other hospital
+    case = make_case(here, ("equipment:ventilator", 3, 0), ("equipment:monitor", 1, 0))
+
+    assert figures(case) == [("ventilator", 2, 1), ("monitor", 1, 0)]
+
+
+def test_operating_rooms_count_available_rooms_with_the_capability_at_this_hospital(make_hospital):
+    here, there = make_hospital(name="Here"), make_hospital(name="There")
+    make_room(here, ["cardiac", "general"])
+    make_room(here, ["cardiac"])
+    for status in (OrStatus.IN_USE, OrStatus.CLEANING, OrStatus.MAINTENANCE, OrStatus.OUT_OF_SERVICE):
+        make_room(here, ["cardiac"], status=status)
+    make_room(here, ["neuro"])  # available, but without the capability
+    make_room(there, ["cardiac"])  # other hospital
+    case = make_case(here, ("room:cardiac", 3, 0), ("room:general", 1, 0))
+
+    assert figures(case) == [("cardiac", 2, 1), ("general", 0, 1)]
+
+
+def test_a_room_with_two_capabilities_covers_one_line_not_both(make_hospital):
+    """One cardiac room that is also general: the cardiac line takes it, so the general line is short."""
+    here = make_hospital()
+    make_room(here, ["cardiac", "general"])
+    case = make_case(here, ("room:cardiac", 1, 0), ("room:general", 1, 0))
+
+    assert figures(case) == [("cardiac", 1, 0), ("general", 0, 1)]
+
+
+def test_equipment_and_rooms_shortfall_subtracts_fulfilled(make_hospital):
+    here = make_hospital()
+    make_equipment(here, "dialysis")
+    make_room(here, ["trauma"])
+    case = make_case(here, ("equipment:dialysis", 2, 0), ("room:trauma", 3, 1))
+
+    assert [row.shortfall for row in local_availability(case)] == [1, 1]
+    assert [item.equipment_type or item.capability for item, _ in shortfall_items(case)] == [
+        "dialysis",
+        "trauma",
+    ]
 
 
 # ── Shortfall ──────────────────────────────────────────────────────────────────────────────────
@@ -227,9 +309,9 @@ def test_the_detail_query_count_is_bounded_and_does_not_grow_with_the_needs(
 
     small = count_queries(doctor, reverse("emergency-case", args=["EC-2026-0001"]))
     url = reverse("emergency-case", args=["EC-2026-0002"])
-    # The overdue check (one query, story #35), the case, its needs, its history, and one grouped count each
-    # for blood and beds, whatever the needs.
-    with django_assert_max_num_queries(6):
+    # The overdue check (one query, story #35), the case, its needs, its history, and one query per resource
+    # type (blood, beds, equipment, operating rooms), whatever the needs.
+    with django_assert_max_num_queries(8):
         big = count_queries(doctor, url)
 
     assert big == small

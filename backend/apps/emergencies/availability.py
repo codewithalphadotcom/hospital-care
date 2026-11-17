@@ -1,4 +1,5 @@
-"""Local availability (story #33): what a case's own hospital has for each need, and what is still short.
+"""Local availability (story #33): what a case's own hospital has for each requirement, and what is still
+short.
 
 Worked out on read and never stored, because stock changes all the time. "Local" is the case's hospital.
 Blood counts exact group and component matches only: cross-group compatibility (O- for anyone) is story #37.
@@ -10,7 +11,9 @@ from django.db.models import Count
 
 from apps.blood.models import BloodUnit
 from apps.blood.services import usable_units
+from apps.equipment.models import Equipment
 from apps.hospitals.models import Bed, BedStatus
+from apps.operating_rooms.models import OperatingRoom
 
 from .models import EmergencyRequest, RequestItem, ResourceType
 
@@ -22,23 +25,41 @@ class ItemAvailability:
     shortfall: int  # still needed from other hospitals: max(0, quantity - fulfilled - available)
 
 
+@dataclass
+class _Stock:
+    """What the case's hospital has, before any line claims it. Counts for the countable kinds; for operating
+    rooms, the usable rooms by id with their capabilities, because one room can serve two capabilities."""
+
+    counts: dict[tuple, int]
+    rooms: list[tuple[int, frozenset[str]]]
+
+
 def local_availability(case: EmergencyRequest) -> list[ItemAvailability]:
     """One row per need, in the order of `case.items`. One grouped query per resource type, however many.
     A case with no hospital has 0 available for everything and runs no query.
 
     Needs that draw on the same stock (two O- blood lines, two ICU lines) share it in list order: the first
     sees the whole stock and the next sees what is left. Otherwise two lines could both claim the same units
-    and the shortfall would be undercounted.
+    and the shortfall would be undercounted. An operating room is claimed by id, so a room that has two
+    capabilities covers one line, not both.
     """
     items = list(case.items.all())
     if not items:
         return []
-    left = _local_stock(case.hospital_id) if case.hospital_id else {}
+    stock = _local_stock(case.hospital_id) if case.hospital_id else _Stock({}, [])
+    counts, rooms = stock.counts, stock.rooms
     rows = []
     for item in items:
-        key = _stock_key(item)
-        available = left.get(key, 0)
-        left[key] = available - min(available, max(0, item.quantity - item.fulfilled))
+        need = max(0, item.quantity - item.fulfilled)
+        if item.resource_type == ResourceType.OPERATING_ROOM:
+            matching = [room for room in rooms if item.capability in room[1]]
+            available = len(matching)
+            claimed = {room_id for room_id, _ in matching[:need]}
+            rooms = [room for room in rooms if room[0] not in claimed]
+        else:
+            key = _stock_key(item)
+            available = counts.get(key, 0)
+            counts[key] = available - min(available, need)
         shortfall = max(0, item.quantity - item.fulfilled - available)
         rows.append(ItemAvailability(item=item, available=available, shortfall=shortfall))
     return rows
@@ -55,12 +76,14 @@ def shortfall_items(case: EmergencyRequest) -> list[tuple[RequestItem, int]]:
 def _stock_key(item: RequestItem) -> tuple:
     if item.resource_type == ResourceType.BLOOD:
         return ("blood", item.blood_group, item.component)
+    if item.resource_type == ResourceType.EQUIPMENT:
+        return ("equipment", item.equipment_type)
     return ("bed", item.bed_type)
 
 
-def _local_stock(hospital_id: int) -> dict[tuple, int]:
-    """Usable blood units by (group, component) and free beds by type, at one hospital: two grouped queries.
-    Blood is exact match only; the compatibility rules are story #37's."""
+def _local_stock(hospital_id: int) -> _Stock:
+    """Usable blood units, free beds, matchable equipment by type and matchable rooms, at one hospital: one
+    query each. Blood is exact match only; the compatibility rules are story #37's."""
     blood = (
         usable_units(BloodUnit.objects.filter(hospital_id=hospital_id))
         .values("group", "component")
@@ -73,7 +96,24 @@ def _local_stock(hospital_id: int) -> dict[tuple, int]:
         .annotate(n=Count("id"))
         .order_by()
     )
-    return {
+    equipment = (
+        Equipment.objects.matchable()
+        .filter(hospital_id=hospital_id)
+        .values("equipment_type")
+        .annotate(n=Count("id"))
+        .order_by()
+    )
+    # ponytail: one query listing the hospital's rooms, not a grouped count, because a room's capabilities
+    # are a JSON list. Fine at per-hospital room counts.
+    rooms = (
+        OperatingRoom.objects.matchable()
+        .filter(hospital_id=hospital_id)
+        .order_by("id")
+        .values_list("id", "capabilities")
+    )
+    counts = {
         **{("blood", row["group"], row["component"]): row["n"] for row in blood},
         **{("bed", row["bed_type"]): row["n"] for row in beds},
+        **{("equipment", row["equipment_type"]): row["n"] for row in equipment},
     }
+    return _Stock(counts, [(room_id, frozenset(codes)) for room_id, codes in rooms])
