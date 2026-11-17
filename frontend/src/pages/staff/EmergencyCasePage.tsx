@@ -11,8 +11,10 @@ import {
   type CandidateItem,
   type CaseAction,
   type EmergencyCaseDetail,
+  type HospitalMatch,
   type Score,
   type StatusChange,
+  type UnmetNeed,
 } from '../../api/emergencies'
 import { FormAlert } from '../../components/form/FormAlert'
 import { TextField } from '../../components/form/TextField'
@@ -116,10 +118,10 @@ function CaseView({ reference }: { reference: string }) {
 /** The server's blood group code, with the minus sign the rest of the page uses: "O- red cells" → "O− red cells". */
 const withMinus = (label: string) => label.replace(/^(AB|A|B|O)-/, '$1−')
 
-/** Distance and travel time as the sources list shows them: "4.2 km · ~6 min". */
-function distanceText(candidate: Candidate): string {
-  if (candidate.distanceKm === null || candidate.travelMinutes === null) return 'Distance unknown'
-  return `${candidate.distanceKm.toFixed(1)} km · ~${candidate.travelMinutes} min`
+/** Distance and travel time as the sources lists show them: "4.2 km · ~6 min". */
+function distanceText(place: { distanceKm: number | null; travelMinutes: number | null }): string {
+  if (place.distanceKm === null || place.travelMinutes === null) return 'Distance unknown'
+  return `${place.distanceKm.toFixed(1)} km · ~${place.travelMinutes} min`
 }
 
 /**
@@ -138,6 +140,7 @@ function Sources({ reference }: { reference: string }) {
       )}
       {result.state === 'ready' && (
         <div className={styles.sources}>
+          {result.data.items.length >= 2 && <BestDestination hospitals={result.data.hospitals} />}
           {result.data.items.map((item) => (
             <SourceItem key={item.itemId} item={item} />
           ))}
@@ -145,6 +148,60 @@ function Sources({ reference }: { reference: string }) {
       )}
     </Panel>
   )
+}
+
+/**
+ * The hospitals judged across every short need at once (story #42), in the server's order. Shown only with two or more
+ * short needs: with one, the list for that need below already answers the question.
+ */
+function BestDestination({ hospitals }: { hospitals: HospitalMatch[] }) {
+  const anyComplete = hospitals.some((hospital) => hospital.complete)
+  return (
+    <section className={styles.source} aria-labelledby="best-destination">
+      <h3 className={styles.sourceHeading} id="best-destination">
+        Best single destination
+      </h3>
+      {!anyComplete && (
+        <p className={styles.hint}>No single hospital has everything; split the request or use the per-need sources below.</p>
+      )}
+      {hospitals.length > 0 && (
+        <ul className={styles.candidates}>
+          {hospitals.map((hospital) => (
+            <DestinationRow key={hospital.hospital.id} hospital={hospital} />
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/**
+ * One hospital across the short needs: whether it has everything, how many it covers, its score and distance, and
+ * what it is missing. The badges are words, not colour alone.
+ */
+function DestinationRow({ hospital }: { hospital: HospitalMatch }) {
+  return (
+    <li className={hospital.recommended ? styles.recommended : styles.candidate}>
+      <div className={styles.candidateTop}>
+        <span className={styles.rank}>Rank {hospital.rank}</span>
+        <strong>{hospital.hospital.name}</strong>
+        {hospital.complete && <span className={styles.badge}>Has everything</span>}
+        {hospital.recommended && <span className={styles.badge}>Recommended</span>}
+        <span className={styles.score}>{hospital.score.toFixed(1)} / 100</span>
+      </div>
+      <div>
+        <span>{hospital.coverage} needs</span>{' · '}
+        <span>{distanceText(hospital)}</span>
+      </div>
+      {hospital.unmet.length > 0 && <p className={styles.missing}>Missing: {hospital.unmet.map(missingText).join(', ')}</p>}
+    </li>
+  )
+}
+
+/** One unmet need in words: "1 × Ventilator", or "1 × O− red cells (only 1 of 2)" when the hospital has some of it. */
+function missingText(need: UnmetNeed): string {
+  const partial = need.available > 0 ? ` (only ${need.available} of ${need.available + need.missing})` : ''
+  return `${need.missing} × ${withMinus(need.need)}${partial}`
 }
 
 /** One short need and the hospitals that have it, best first, or the empty state when none do. */

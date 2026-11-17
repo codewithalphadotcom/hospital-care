@@ -311,6 +311,11 @@
   display: block;
 }
 
+/* The needs a hospital is missing, in the best destination list (story #42). */
+.missing {
+  margin: 0;
+}
+
 .candidate,
 .recommended {
   display: grid;

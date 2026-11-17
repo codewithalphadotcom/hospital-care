@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail, mockApi, mockStaffApi, userFor } from '../../test/mockApi'
 import { renderStaff } from '../../test/renderStaff'
-import { sampleCases, sampleNewNeedsCase } from '../../test/fixtures/emergencies'
+import { sampleCases, sampleNewNeedsCase, sampleThreeNeedSources } from '../../test/fixtures/emergencies'
 import type { StatusChange } from '../../api/emergencies'
 
 afterEach(() => vi.restoreAllMocks())
@@ -372,5 +372,72 @@ describe('EmergencyCasePage: ranked sources and their scores (#41)', () => {
     const [riverside, northside] = await sourceRows('O− red cells: short 3')
     expect(within(riverside!).getByText('4.2 km · ~6 min')).toBeInTheDocument()
     expect(within(northside!).getByText('Distance unknown')).toBeInTheDocument()
+  })
+})
+
+/** The rows of the best single destination list, in the order they are on the screen. */
+async function destinationRows(): Promise<HTMLElement[]> {
+  const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+  const best = await within(sources).findByRole('region', { name: 'Best single destination' })
+  return Array.from(best.querySelector('ul')!.children) as HTMLElement[]
+}
+
+describe('EmergencyCasePage: the best single destination across the short needs (#42)', () => {
+  it('lists the hospitals in the server’s order, labelling the one with everything and recommending it', async () => {
+    mockStaffApi({ role: 'doctor', candidates: sampleThreeNeedSources() })
+    renderStaff(CASE)
+
+    const [full, partial, sea] = await destinationRows()
+    expect(
+      [full, partial, sea].map((row) => row!.querySelector('strong')?.textContent),
+    ).toEqual(['Riverside Medical Centre', "Northside Children's Hospital", 'Seaview Hospital'])
+    expect(within(full!).getByText('Has everything')).toBeInTheDocument()
+    expect(within(full!).getByText('Recommended')).toBeInTheDocument()
+    expect(within(partial!).queryByText('Has everything')).toBeNull()
+    expect(within(partial!).queryByText('Recommended')).toBeNull()
+    expect(within(sea!).queryByText('Recommended')).toBeNull()
+  })
+
+  it('shows each hospital’s coverage, score, and distance and travel time', async () => {
+    mockStaffApi({ role: 'doctor', candidates: sampleThreeNeedSources() })
+    renderStaff(CASE)
+
+    const [full, partial] = await destinationRows()
+    expect(within(full!).getByText('3 of 3 needs')).toBeInTheDocument()
+    expect(within(full!).getByText('88.7 / 100')).toBeInTheDocument()
+    expect(within(full!).getByText('4.2 km · ~6 min')).toBeInTheDocument()
+    expect(within(partial!).getByText('1 of 3 needs')).toBeInTheDocument()
+    expect(within(partial!).getByText('Distance unknown')).toBeInTheDocument()
+  })
+
+  it('lists what a partial hospital is missing, with only some of a partial quantity', async () => {
+    mockStaffApi({ role: 'doctor', candidates: sampleThreeNeedSources() })
+    renderStaff(CASE)
+
+    const [, partial, sea] = await destinationRows()
+    expect(within(partial!).getByText('Missing: 2 × Ventilator, 1 × O− red cells (only 1 of 2)')).toBeInTheDocument()
+    expect(within(sea!).getByText('Missing: 1 × ICU bed, 1 × Ventilator (only 1 of 2), 2 × O− red cells')).toBeInTheDocument()
+  })
+
+  it('says no single hospital has everything when none does', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const sources = await screen.findByRole('region', { name: 'Sources in the network' })
+    const best = await within(sources).findByRole('region', { name: 'Best single destination' })
+    expect(
+      within(best).getByText('No single hospital has everything; split the request or use the per-need sources below.'),
+    ).toBeInTheDocument()
+    expect(within(best).queryByText('Has everything')).toBeNull()
+  })
+
+  it('is hidden when there is only one short need, because that need’s own list already answers it', async () => {
+    const full = sampleThreeNeedSources()
+    mockStaffApi({ role: 'doctor', candidates: { ...full, items: [full.items[0]!] } })
+    renderStaff(CASE)
+
+    expect(await screen.findByRole('heading', { name: 'ICU bed: short 1' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Best single destination' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Best single destination' })).toBeNull()
   })
 })
