@@ -8,6 +8,7 @@ import {
   newNeed,
   nextStatus,
   serverErrors,
+  shortfallSummary,
   stepWithErrors,
   toCaseInput,
   validateCaseStep,
@@ -96,5 +97,13 @@ describe('case lifecycle mirror (#34)', () => {
     const opening = { fromStatus: '', toStatus: 'open', action: 'create', note: '', actor: null, at: '' } as const
     expect(describeMove(opening)).toBe('Case opened')
     expect(describeMove({ ...opening, fromStatus: 'matching', toStatus: 'fulfilled', action: 'fulfil' })).toBe('Matching → Fulfilled')
+  })
+})
+
+describe('local availability summary (#33)', () => {
+  it('says everything is available when nothing is short, and counts what is short otherwise', () => {
+    expect(shortfallSummary(0)).toBe('Everything is available here')
+    expect(shortfallSummary(1)).toBe('1 unit or bed needed from other hospitals')
+    expect(shortfallSummary(4)).toBe('4 units/beds needed from other hospitals')
   })
 })

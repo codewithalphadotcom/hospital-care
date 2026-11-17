@@ -6,7 +6,7 @@ import { FormAlert } from '../../components/form/FormAlert'
 import { TextField } from '../../components/form/TextField'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { ACTION_LABEL, describeMove, describeNeed, SEVERITY_TONE, STATUS_LABEL } from '../../features/emergencies/emergencies'
+import { ACTION_LABEL, describeMove, describeNeed, SEVERITY_TONE, shortfallSummary, STATUS_LABEL } from '../../features/emergencies/emergencies'
 import styles from '../../features/emergencies/Emergencies.module.css'
 import { canEdit } from '../../features/staff/roles'
 import { useStaff } from '../../features/staff/staffContext'
@@ -68,9 +68,15 @@ function CaseView({ reference }: { reference: string }) {
           <dd>
             <ul className={styles.needs}>
               {kase.items.map((need, i) => (
-                <li key={i}>{describeNeed(need)}</li>
+                <li key={i}>
+                  <span>{describeNeed(need)}</span>{' '}
+                  <span className={styles.hint}>
+                    Available here: {need.localAvailable} · {need.shortfall > 0 ? `Short: ${need.shortfall}` : 'Covered locally'}
+                  </span>
+                </li>
               ))}
             </ul>
+            <p className={styles.summary}>{shortfallSummary(kase.shortfallTotal)}</p>
           </dd>
         </dl>
       </Panel>

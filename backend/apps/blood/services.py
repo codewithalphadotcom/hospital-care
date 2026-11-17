@@ -132,12 +132,18 @@ def expire_overdue_units(now=None) -> int:
 # ── Stock (story #19) ─────────────────────────────────────────────────────────────────────────────
 
 
+def usable_units(units, now=None):
+    """The units that count as usable stock: `available` and not yet expired. Stock counts and the local
+    availability check (#33) both use this, so they agree on what is on the shelf."""
+    return units.filter(status=UnitStatus.AVAILABLE, expires_at__gt=now or timezone.now())
+
+
 def stock_summary(units, *, near_expiry_days: int, low_stock_units: int, now=None) -> dict:
     """Counts per blood group and component, with near-expiry units and low-stock flags.
     Only `available` units count as usable stock."""
     now = now or timezone.now()
     soon = now + timedelta(days=near_expiry_days)
-    usable = units.filter(status=UnitStatus.AVAILABLE, expires_at__gt=now)
+    usable = usable_units(units, now)
     available = Counter(usable.values_list("group", "component"))
     reserved = Counter(
         units.filter(status=UnitStatus.RESERVED, expires_at__gt=now).values_list("group", "component")

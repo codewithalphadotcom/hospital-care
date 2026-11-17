@@ -1,5 +1,14 @@
 import type { EmergencyCase } from '../../api/emergencies'
 
+/**
+ * What CityCare General has free for each sample case's needs, in item order (story #33). EC-2026-0002 is short
+ * (1 of 4 O− red cells, no ICU bed: 4 needed elsewhere); EC-2026-0001 is covered (2 of 2 general beds).
+ */
+export const sampleLocalAvailable: Record<string, number[]> = {
+  'EC-2026-0002': [1, 0],
+  'EC-2026-0001': [2],
+}
+
 /** Two cases at CityCare General, in the order the server lists them. Fresh copies every call. */
 export function sampleCases(now: Date): EmergencyCase[] {
   const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString()

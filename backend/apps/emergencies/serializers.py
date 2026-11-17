@@ -5,6 +5,7 @@ from rest_framework import serializers
 from apps.blood.models import BloodGroup, Component
 from apps.hospitals.models import BedType
 
+from .availability import local_availability
 from .models import (
     REQUEST_LIFECYCLE,
     EmergencyRequest,
@@ -109,13 +110,25 @@ class StatusChangeSerializer(serializers.ModelSerializer):
 
 
 class CaseDetailSerializer(CaseSerializer):
-    """One case with its timeline (oldest first) and the actions valid from its current status (story #34)."""
+    """One case with its timeline (oldest first), the actions valid from its current status (story #34), and
+    what its hospital has for each need (story #33): `localAvailable` and `shortfall` per item, and the case's
+    `shortfallTotal`. Only the detail computes availability, so the list stays cheap."""
 
     history = StatusChangeSerializer(many=True, read_only=True)
     actions = serializers.SerializerMethodField()
 
     class Meta(CaseSerializer.Meta):
-        fields = [*CaseSerializer.Meta.fields, "history", "actions"]
+        fields = [*CaseSerializer.Meta.fields, "history", "actions"]  # shortfallTotal: see to_representation
+
+    def to_representation(self, case):
+        rows = local_availability(case)  # same order as the items below: both read case.items
+        data = super().to_representation(case)
+        data["items"] = [
+            {**need, "localAvailable": row.available, "shortfall": row.shortfall}
+            for need, row in zip(data["items"], rows, strict=True)
+        ]
+        data["shortfallTotal"] = sum(row.shortfall for row in rows)
+        return data
 
     def get_actions(self, case):
         return [action for status, action in REQUEST_LIFECYCLE.transitions if status == case.status]

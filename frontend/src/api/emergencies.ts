@@ -45,8 +45,18 @@ export interface StatusChange {
   at: string
 }
 
-/** A case with its timeline and the moves valid from its current status. Shape of `CaseDetailSerializer`. */
+/** What the case's own hospital has for one need (story #33). Only the detail carries it. */
+export type NeedAvailability = { localAvailable: number; shortfall: number }
+export type AvailableNeed = Need & NeedAvailability
+
+/**
+ * A case with its timeline, the moves valid from its current status, and what its hospital has for each need
+ * (story #33). Shape of `CaseDetailSerializer`.
+ */
 export interface EmergencyCaseDetail extends EmergencyCase {
+  items: AvailableNeed[]
+  /** Units and beds still needed from other hospitals: the sum of the items' shortfalls. */
+  shortfallTotal: number
   history: StatusChange[]
   actions: CaseAction[]
 }

@@ -273,6 +273,16 @@
   padding-left: var(--space-5);
 }
 
+/* Each need's local availability (#33) sits on its own line under the need. */
+.needs .hint {
+  display: block;
+}
+
+.summary {
+  margin: var(--space-3) 0 0;
+  font-weight: 700;
+}
+
 .moves {
   display: flex;
   flex-wrap: wrap;

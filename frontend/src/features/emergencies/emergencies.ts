@@ -22,6 +22,12 @@ export function describeNeed(need: Need): string {
   return `${need.quantity} × ${TYPE_LABEL[need.bedType]} bed${need.quantity === 1 ? '' : 's'}`
 }
 
+/** The case's summary of local availability (story #33). `total` is the server's `shortfallTotal`. */
+export function shortfallSummary(total: number): string {
+  if (total === 0) return 'Everything is available here'
+  return total === 1 ? '1 unit or bed needed from other hospitals' : `${total} units/beds needed from other hospitals`
+}
+
 export const STATUS_LABEL: Record<CaseStatus, string> = {
   open: 'Open',
   matching: 'Matching',

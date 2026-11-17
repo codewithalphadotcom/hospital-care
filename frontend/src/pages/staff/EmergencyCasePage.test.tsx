@@ -24,10 +24,27 @@ describe('EmergencyCasePage (story #34 status tracking)', () => {
     expect(within(panel).getByText('Critical')).toBeInTheDocument()
     expect(within(panel).getByText('Open')).toBeInTheDocument()
     expect(within(panel).getByText('Bay 4')).toBeInTheDocument()
-    expect(within(within(panel).getByRole('list')).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      '4 × O− red cells',
-      '1 × ICU bed',
-    ])
+    const needs = within(within(panel).getByRole('list')).getAllByRole('listitem')
+    expect(needs.map((li) => li.querySelector('span')?.textContent)).toEqual(['4 × O− red cells', '1 × ICU bed'])
+  })
+
+  it('shows, for each need, what this hospital has and what is short, as text', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff(CASE)
+
+    const [blood, bed] = within(within(await details()).getByRole('list')).getAllByRole('listitem')
+    expect(within(blood!).getByText('Available here: 1 · Short: 3')).toBeInTheDocument()
+    expect(within(bed!).getByText('Available here: 0 · Short: 1')).toBeInTheDocument()
+    expect(within(await details()).getByText('4 units/beds needed from other hospitals')).toBeInTheDocument()
+  })
+
+  it('says everything is available, and covered locally, when no need is short', async () => {
+    mockStaffApi({ role: 'doctor', cases: [sampleCases(new Date())[1]!] })
+    renderStaff('/staff/emergencies/EC-2026-0001')
+
+    const panel = await screen.findByRole('region', { name: 'EC-2026-0001' })
+    expect(within(panel).getByText('Available here: 2 · Covered locally')).toBeInTheDocument()
+    expect(within(panel).getByText('Everything is available here')).toBeInTheDocument()
   })
 
   it('offers only the moves the case’s status allows', async () => {

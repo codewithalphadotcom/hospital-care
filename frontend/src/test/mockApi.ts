@@ -11,7 +11,7 @@ import { actionsFor, nextStatus, STATUS_LABEL } from '../features/emergencies/em
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
-import { sampleCases } from './fixtures/emergencies'
+import { sampleCases, sampleLocalAvailable } from './fixtures/emergencies'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
 import { sampleMedicines } from './fixtures/pharmacy'
 import { samplePublicStatus } from './fixtures/publicStatus'
@@ -120,7 +120,18 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
   })
   const histories = new Map<string, StatusChange[]>(cases.map((c) => [c.id, [openingEntry(c)]]))
   const findCase = (reference: string) => cases.find((c) => c.id === reference)
-  const detailOf = (c: EmergencyCase): EmergencyCaseDetail => ({ ...c, history: histories.get(c.id) ?? [], actions: actionsFor(c.status) })
+  /** The case as the server returns it: each need with what this hospital has (story #33), from the sample stock. */
+  const detailOf = (c: EmergencyCase): EmergencyCaseDetail => {
+    const local = sampleLocalAvailable[c.id] ?? []
+    const items = c.items.map((need, i) => ({ ...need, localAvailable: local[i] ?? 0, shortfall: Math.max(0, need.quantity - (local[i] ?? 0)) }))
+    return {
+      ...c,
+      items,
+      shortfallTotal: items.reduce((sum, need) => sum + need.shortfall, 0),
+      history: histories.get(c.id) ?? [],
+      actions: actionsFor(c.status),
+    }
+  }
   const gate =(module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
   /** Like gate, but the reply sees the request, and `networkDown` fails it. Reads need view, writes need edit. */

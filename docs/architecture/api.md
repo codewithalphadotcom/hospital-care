@@ -115,7 +115,7 @@ Users at a hospital see only its cases (another hospital's case → **404**); st
 |---|---|---|---|---|
 | GET | `/emergencies/` | – | `EmergencyCase[]`, most severe first, then oldest first | #30, #31 |
 | POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
-| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history` and `actions` | #30, #34 |
+| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions` and local availability | #30, #33, #34 |
 | POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
 
 ```ts
@@ -196,6 +196,31 @@ The status change, the entry and the audit record are written in one transaction
 Reads follow the hospital rule above. So an admin who works at one hospital can move another hospital's case, as the
 rule for moves says, but cannot open its page. That is an open question in the
 [#34 inception spec](../aidlc/inception/2026-11-17-emergency-status-tracking.md).
+
+### Local availability (#33)
+
+The detail says what the case's own hospital has for each need. The list does not carry these fields.
+
+```ts
+EmergencyCaseDetail = EmergencyCase & {
+  items: (RequestItem & {
+    localAvailable: number,     // usable stock at the case's hospital that matches this need exactly
+    shortfall: number           // max(0, quantity - fulfilled - localAvailable)
+  })[],
+  shortfallTotal: number        // sum of the items' shortfall: units and beds still needed from other hospitals
+}
+```
+
+- **Blood** counts units at the case's hospital that are **exact** matches: the same group and the same component,
+  status `available`, and not expired (`expires_at` after now, the same rule as the stock view). Quarantined, reserved,
+  issued, discarded and expired units do not count. **Compatible groups do not count** (O− for an A+ need, for example):
+  cross-group matching is story #37.
+- **Beds** count free beds (`status` `free`) of the need's `bedType` at the case's hospital.
+- Requirements that draw on the same stock share it in list order: the first sees the whole stock, the next sees what
+  is left after it.
+- A case with no hospital has `localAvailable` 0 for every need, so each need's shortfall is what is still unfulfilled.
+- The shortfalls are computed on read and never stored. The matching step (#38) reads them through
+  `shortfall_items(case)` in `backend/apps/emergencies/availability.py`.
 
 ## Demo data
 
