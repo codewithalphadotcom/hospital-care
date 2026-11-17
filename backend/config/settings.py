@@ -148,6 +148,10 @@ BLOOD_APPOINTMENT_SLOT_MINUTES = int(os.environ.get("BLOOD_APPOINTMENT_SLOT_MINU
 # A critical case still unfulfilled after this many minutes in its current status is escalated (story #35).
 EMERGENCY_ESCALATION_MINUTES = positive_int_env("EMERGENCY_ESCALATION_MINUTES", 30)
 
+# A reserved resource is held for this many minutes unless it is used or released first (story #43). The
+# hold's end is stored when it is made, so changing this later doesn't move holds already made.
+RESERVATION_HOLD_MINUTES = positive_int_env("RESERVATION_HOLD_MINUTES", 30)
+
 # Candidate scoring (story #40). MATCHING_SCORING is JSON per resource type: the strategy and the factor
 # weights, merged over the defaults in apps/matching/scoring.py. A bad value stops the server at startup.
 MATCHING_SCORING = parse_scoring_config(os.environ.get("MATCHING_SCORING", ""))
