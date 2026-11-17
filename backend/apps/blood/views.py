@@ -130,11 +130,7 @@ class BloodStockView(APIView):
             return Response({"nearExpiryDays": ["Must be between 0 and 60."]}, status=400)
         services.expire_overdue_units()
         units = own_hospital(BloodUnit.objects.all(), request.user)
-        return Response(
-            services.stock_summary(
-                units, near_expiry_days=days, low_stock_units=settings.BLOOD_LOW_STOCK_UNITS
-            )
-        )
+        return Response(services.stock_summary(units, near_expiry_days=days))
 
 
 class DonorListView(APIView):
@@ -189,7 +185,8 @@ class DonorScreeningView(APIView):
 
 
 class AppointmentListView(APIView):
-    """GET /api/blood/appointments/?from=YYYY-MM-DD (upcoming by default) · POST books one (story #22)."""
+    """GET /api/blood/appointments/ (upcoming booked; ?all=true adds past and cancelled) · POST books one
+    (story #22)."""
 
     permission_classes = [BloodAccess]
 

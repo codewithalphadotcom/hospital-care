@@ -16,6 +16,7 @@ from apps.resources.services import change_status
 from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import (
+    MINIMUM_STOCK,
     REQUIRED_TESTS,
     AppointmentStatus,
     BloodGroup,
@@ -26,6 +27,7 @@ from .models import (
     TestResult,
     UnitStatus,
     min_donation_interval,
+    stock_level,
 )
 from .serializers import BloodUnitSerializer
 
@@ -51,10 +53,17 @@ def check_donation_interval(donor: Donor, collected_at: datetime) -> None:
         )
 
 
+def _check_own_donor(actor, donor: Donor) -> None:
+    """Own-hospital rule (docs/architecture/api.md): staff only use donors registered at their hospital."""
+    if not may_change(actor, donor):
+        raise PermissionDenied("You can only use donors registered at your own hospital.")
+
+
 def register_unit(serializer, actor) -> BloodUnit:
     """Create a blood unit from a valid serializer, scoped to the actor's hospital, and audit-log it."""
     donor = serializer.validated_data.get("donor")
     if donor is not None:
+        _check_own_donor(actor, donor)
         check_donation_interval(donor, serializer.validated_data["collected_at"])
     unit = serializer.save(hospital=getattr(actor, "hospital", None))
     after = BloodUnitSerializer(unit, context={"now": timezone.now()}).data
@@ -132,9 +141,9 @@ def expire_overdue_units(now=None) -> int:
 # ── Stock (story #19) ─────────────────────────────────────────────────────────────────────────────
 
 
-def stock_summary(units, *, near_expiry_days: int, low_stock_units: int, now=None) -> dict:
-    """Counts per blood group and component, with near-expiry units and low-stock flags.
-    Only `available` units count as usable stock."""
+def stock_summary(units, *, near_expiry_days: int, now=None) -> dict:
+    """Counts per blood group and component, with near-expiry units and each count's level against its
+    minimum stock (MINIMUM_STOCK). Only `available` units count as usable stock."""
     now = now or timezone.now()
     soon = now + timedelta(days=near_expiry_days)
     usable = units.filter(status=UnitStatus.AVAILABLE, expires_at__gt=now)
@@ -151,6 +160,8 @@ def stock_summary(units, *, near_expiry_days: int, low_stock_units: int, now=Non
     for group in BloodGroup.values:
         for component in Component.values:
             key = (group, component)
+            minimum = MINIMUM_STOCK[component][group]
+            level = stock_level(available[key], minimum)
             rows.append(
                 {
                     "group": group,
@@ -159,12 +170,13 @@ def stock_summary(units, *, near_expiry_days: int, low_stock_units: int, now=Non
                     "reserved": reserved[key],
                     "quarantined": quarantined[key],
                     "nearExpiry": near_counts[key],
-                    "low": available[key] < low_stock_units,
+                    "minimum": minimum,
+                    "level": level,
+                    "low": level != "ok",
                 }
             )
     return {
         "nearExpiryDays": near_expiry_days,
-        "lowStockUnits": low_stock_units,
         "rows": rows,
         "nearExpiryUnits": BloodUnitSerializer(
             near.order_by("expires_at"), many=True, context={"now": now}
@@ -211,6 +223,7 @@ def screen_donor(donor: Donor, *, eligible: bool, reason: str, deferred_until, a
 
 
 def book_appointment(donor: Donor, starts_at: datetime, *, actor) -> DonationAppointment:
+    _check_own_donor(actor, donor)
     slot = settings.BLOOD_APPOINTMENT_SLOT_MINUTES
     local = timezone.localtime(starts_at)
     if local.second or local.microsecond or (local.hour * 60 + local.minute) % slot:
@@ -225,6 +238,13 @@ def book_appointment(donor: Donor, starts_at: datetime, *, actor) -> DonationApp
     hospital = getattr(actor, "hospital", None) or donor.hospital
     if donor.appointments.filter(status=AppointmentStatus.BOOKED, starts_at__gte=timezone.now()).exists():
         raise ValidationError({"donorId": ["This donor already has an upcoming appointment."]})
+    # The unique constraint is the real guard against two requests at once, but its "no hospital" case
+    # (nulls_distinct=False) is only enforced by PostgreSQL 15+, not the SQLite fallback. Check here too.
+    slot_taken = DonationAppointment.objects.filter(
+        hospital=hospital, starts_at=starts_at, status=AppointmentStatus.BOOKED
+    ).exists()
+    if slot_taken:
+        raise ValidationError({"startsAt": ["That slot is already booked."]})
     try:
         with transaction.atomic():
             appointment = DonationAppointment.objects.create(

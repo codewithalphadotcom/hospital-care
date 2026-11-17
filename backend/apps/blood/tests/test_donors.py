@@ -192,3 +192,26 @@ def test_donor_cannot_hold_two_upcoming_appointments(staff):
 def test_unit_collected_in_the_future_is_refused(staff):
     res = register_unit(staff, "U1", None, days_ago=-2)
     assert res.status_code == 400 and "collectedAt" in res.json()
+
+
+# ── Own-hospital rule for donors (docs/architecture/api.md) ──────────────────────────────────────
+
+
+def test_staff_cannot_use_another_hospitals_donor(client_as, make_hospital):
+    ours, theirs = make_hospital(name="Ours"), make_hospital(name="Theirs")
+    staff_here = client_as(Role.BLOOD_BANK, hospital=ours)
+    donor(hospital=theirs)
+
+    assert register_unit(staff_here, "U1", "DNR-00001").status_code == 403
+    assert book(staff_here, "DNR-00001", next_slot()).status_code == 403
+    assert not BloodUnit.objects.exists() and not DonationAppointment.objects.exists()
+
+
+def test_staff_can_use_their_own_hospitals_donor(client_as, make_hospital):
+    ours = make_hospital(name="Ours")
+    staff_here = client_as(Role.BLOOD_BANK, hospital=ours)
+    donor("DNR-00001", hospital=ours)
+    donor("DNR-00002", hospital=ours)  # a second donor: DNR-00001 can't be booked right after giving blood
+
+    assert register_unit(staff_here, "U1", "DNR-00001").status_code == 201
+    assert book(staff_here, "DNR-00002", next_slot()).status_code == 201
