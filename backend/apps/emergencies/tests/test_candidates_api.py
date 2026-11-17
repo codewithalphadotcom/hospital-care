@@ -1,5 +1,6 @@
 """Story #38: GET /api/emergencies/<reference>/candidates/, the other hospitals that can supply each short
-need. Story #41: each item's hospitals come ranked and scored, with the breakdown of each score."""
+need. Story #41: each item's hospitals come ranked and scored, with the breakdown of each score.
+Story #42: the hospitals judged across all the short needs at once."""
 
 import itertools
 from datetime import timedelta
@@ -146,7 +147,11 @@ def test_a_case_covered_locally_has_no_items(client_as, make_hospital):
     bed(here, "icu")
     case(here, icu(1))
 
-    assert get(client_as(Role.DOCTOR, hospital=here)).json() == {"reference": REFERENCE, "items": []}
+    assert get(client_as(Role.DOCTOR, hospital=here)).json() == {
+        "reference": REFERENCE,
+        "items": [],
+        "hospitals": [],
+    }
 
 
 def test_another_hospitals_case_is_not_found(client_as, make_hospital):
@@ -298,3 +303,76 @@ def test_the_scoring_setting_changes_the_order_through_the_api(client_as, make_h
         [item] = get(doctor).json()["items"]
     assert [c["hospital"]["name"] for c in item["candidates"]] == ["Deep", "Near"]
     assert item["strategy"] == {"name": "mostStock", "label": "Most stock first"}
+
+
+# Story #42: the hospitals judged across all the short needs at once.
+
+
+def hospitals_for(client_as, hospital):
+    return get(client_as(Role.DOCTOR, hospital=hospital)).json()["hospitals"]
+
+
+def test_three_needs_across_three_hospitals_put_the_one_with_everything_first(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    full = make_hospital(name="Full", latitude="25.220700", longitude="67.001100")  # about 40 km north
+    bed_and_blood = make_hospital(
+        name="Bed and blood", latitude="24.960700", longitude="67.001100"
+    )  # about 11 km north
+    vent_only = make_hospital(name="Vent only")  # the same spot as here: nearest, best scored, still partial
+    bed(full, "icu")
+    ventilator(full)
+    unit(full)
+    unit(full)
+    bed(bed_and_blood, "icu")
+    for _ in range(5):
+        unit(bed_and_blood)
+    ventilator(vent_only)
+    created = case(here, icu(1), vents(1), blood(2))
+    icu_id, vent_id, blood_id = created.items.order_by("id").values_list("pk", flat=True)
+
+    full_row, two_row, vent_row = hospitals_for(client_as, here)
+
+    assert [row["hospital"]["name"] for row in (full_row, two_row, vent_row)] == [
+        "Full",
+        "Bed and blood",
+        "Vent only",
+    ]
+    assert [row["rank"] for row in (full_row, two_row, vent_row)] == [1, 2, 3]
+    assert (full_row["complete"], full_row["recommended"], full_row["coverage"]) == (True, True, "3 of 3")
+    assert (full_row["coveredCount"], full_row["totalNeeds"], full_row["unmet"]) == (3, 3, [])
+    assert {need["need"] for need in full_row["covered"]} == {"ICU bed", "Ventilator", "O- red cells"}
+    assert full_row["distanceKm"] == pytest.approx(40.0, abs=0.5)
+    assert full_row["travelMinutes"] == 60
+
+    assert (two_row["complete"], two_row["recommended"], two_row["coverage"]) == (False, False, "2 of 3")
+    assert two_row["unmet"] == [{"itemId": vent_id, "need": "Ventilator", "missing": 1, "available": 0}]
+
+    assert vent_row["unmet"] == [
+        {"itemId": icu_id, "need": "ICU bed", "missing": 1, "available": 0},
+        {"itemId": blood_id, "need": "O- red cells", "missing": 2, "available": 0},
+    ]
+
+
+def test_only_a_hospital_with_everything_is_recommended(client_as, make_hospital):
+    here = make_hospital(name="Here")
+    bed_only, vent_only = make_hospital(name="Bed only"), make_hospital(name="Vent only")
+    bed(bed_only)
+    ventilator(vent_only)
+    case(here, icu(1), vents(1))
+
+    rows = hospitals_for(client_as, here)
+
+    assert [row["complete"] for row in rows] == [False, False]
+    assert [row["recommended"] for row in rows] == [False, False]
+
+
+def test_a_partial_quantity_is_unmet_with_what_the_hospital_has(client_as, make_hospital):
+    here, stock = make_hospital(name="Here"), make_hospital(name="Stock")
+    ventilator(stock)
+    created = case(here, vents(2))
+    [vent_id] = created.items.values_list("pk", flat=True)
+
+    [row] = hospitals_for(client_as, here)
+
+    assert row["unmet"] == [{"itemId": vent_id, "need": "Ventilator", "missing": 1, "available": 1}]
+    assert row["coverage"] == "0 of 1"

@@ -9,6 +9,7 @@ from apps.accounts.permissions import module_permission, own_hospital
 from apps.hospitals.models import DoctorShift
 from apps.hospitals.serializers import DoctorSerializer
 from apps.matching.candidates import candidates_for_case
+from apps.matching.multi import match_hospitals
 from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import EmergencyRequest, EmergencyStatus, RequestItem, RequestStatus, RequestStatusChange
@@ -20,6 +21,7 @@ from .serializers import (
     CaseSerializer,
     FeedEntrySerializer,
     FeedQuerySerializer,
+    HospitalMatchSerializer,
 )
 from .services import ACTIVE, OutcomeNoteRequired, apply_case_action, create_case, escalate_overdue
 
@@ -120,8 +122,9 @@ class EmergencyFeedView(APIView):
 class CaseCandidatesView(APIView):
     """GET /api/emergencies/<reference>/candidates/ → the other hospitals that can supply each short
     requirement (story #38). Items with no shortfall are left out, so a case that is covered locally gets
-    `items: []`. Each item's hospitals come ranked and scored, best first (story #41). The same read rule as
-    the detail: another hospital's case is 404. Doesn't escalate, so it stays a plain read."""
+    `items: []`. Each item's hospitals come ranked and scored, best first (story #41). `hospitals` ranks the
+    hospitals across all the short needs at once (story #42). The same read rule as the detail: another
+    hospital's case is 404. Doesn't escalate, so it stays a plain read."""
 
     permission_classes = [module_permission("emergencies")]
 
@@ -132,7 +135,11 @@ class CaseCandidatesView(APIView):
         )
         found = candidates_for_case(case)
         return Response(
-            {"reference": case.reference, "items": CandidateItemSerializer(found, many=True).data}
+            {
+                "reference": case.reference,
+                "items": CandidateItemSerializer(found, many=True).data,
+                "hospitals": HospitalMatchSerializer(match_hospitals(found), many=True).data,
+            }
         )
 
 

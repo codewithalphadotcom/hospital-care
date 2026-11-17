@@ -5,6 +5,7 @@ from rest_framework import serializers
 from apps.blood.models import BloodGroup, Component
 from apps.equipment.models import EquipmentType
 from apps.hospitals.models import BedType
+from apps.matching.multi import HospitalMatch
 from apps.matching.scoring import FACTOR_LABELS, rank, strategy_for
 from apps.operating_rooms.models import OrCapability
 
@@ -261,4 +262,33 @@ class CandidateItemSerializer(serializers.Serializer):
             "shortfall": found.shortfall,
             "strategy": {"name": strategy.name, "label": strategy.label},
             "candidates": [CandidateSerializer(ranked).data for ranked in rank(found)],
+        }
+
+
+class HospitalMatchSerializer(serializers.Serializer):
+    """One hospital judged across the case's short needs (story #42), best first. Shape of `HospitalMatch` in
+    api/emergencies.ts. `recommended` is true only on rank 1, and only when that hospital has everything."""
+
+    def to_representation(self, match: HospitalMatch):
+        return {
+            "rank": match.rank,
+            "hospital": {"id": match.hospital.pk, "name": match.hospital.name},
+            "complete": match.complete,
+            "recommended": match.rank == 1 and match.complete,
+            "coverage": f"{len(match.covered)} of {match.total_needs}",
+            "coveredCount": len(match.covered),
+            "totalNeeds": match.total_needs,
+            "score": match.score,
+            "distanceKm": None if match.distance_km is None else round(match.distance_km, 1),
+            "travelMinutes": match.travel_minutes,
+            "covered": [{"itemId": m.item.pk, "need": need_label(m.item)} for m in match.covered],
+            "unmet": [
+                {
+                    "itemId": m.item.pk,
+                    "need": need_label(m.item),
+                    "missing": m.missing,
+                    "available": m.available,
+                }
+                for m in match.unmet
+            ],
         }
