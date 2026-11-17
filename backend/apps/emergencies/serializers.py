@@ -5,7 +5,9 @@ from rest_framework import serializers
 from apps.blood.models import BloodGroup, Component
 from apps.equipment.models import EquipmentType
 from apps.hospitals.models import BedType
+from apps.matching.models import ACTIVE, Reservation
 from apps.matching.multi import HospitalMatch
+from apps.matching.reservations import resource_label
 from apps.matching.scoring import FACTOR_LABELS, rank, strategy_for
 from apps.operating_rooms.models import OrCapability
 
@@ -161,10 +163,45 @@ class StatusChangeSerializer(serializers.ModelSerializer):
         return (user.get_full_name() or user.email) if user else None
 
 
+class ReservationSerializer(serializers.ModelSerializer):
+    """One hold on a resource for a need (story #43). Shape of `CaseReservation` in
+    frontend/src/api/emergencies.ts. Reads `hospital`, `reserved_by` and `resource`: select them, so the list
+    costs no query per hold."""
+
+    itemId = serializers.IntegerField(source="request_item_id", read_only=True)
+    resource = serializers.SerializerMethodField()
+    hospital = serializers.SerializerMethodField()
+    expiresAt = serializers.DateTimeField(source="expires_at", read_only=True)
+    reservedBy = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Reservation
+        fields = ["id", "itemId", "resource", "hospital", "status", "expiresAt", "reservedBy"]
+
+    def get_resource(self, hold):
+        return resource_label(hold.resource)
+
+    def get_hospital(self, hold):
+        return {"id": hold.hospital_id, "name": hold.hospital.name}
+
+    def get_reservedBy(self, hold):
+        user = hold.reserved_by
+        return user.get_full_name() or user.email
+
+
+class ReservationInputSerializer(serializers.Serializer):
+    """POST /api/emergencies/<reference>/reservations/: one need of the case, and how many to hold here."""
+
+    itemId = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1)
+
+
 class CaseDetailSerializer(CaseSerializer):
     """One case with its timeline (oldest first), the actions valid from its current status (story #34), and
-    what its hospital has for each need (story #33): `localAvailable` and `shortfall` per item, and the case's
-    `shortfallTotal`. Only the detail computes availability, so the list stays cheap."""
+    what its hospital has for each need (story #33): `localAvailable` and `shortfall` per item, and the
+    case's `shortfallTotal`. Only the detail computes availability, so the list stays cheap. Also the holds
+    on the case's stock (story #43): `reserved` per item (held, not yet allocated) and `reservations`, the
+    held and allocated ones."""
 
     history = StatusChangeSerializer(many=True, read_only=True)
     actions = serializers.SerializerMethodField()
@@ -178,10 +215,22 @@ class CaseDetailSerializer(CaseSerializer):
         rows = local_availability(case)  # same order as the items below: both read case.items
         data = super().to_representation(case)
         data["items"] = [
-            {**need, "localAvailable": row.available, "shortfall": row.shortfall}
+            {
+                **need,
+                "itemId": row.item.pk,
+                "localAvailable": row.available,
+                "shortfall": row.shortfall,
+                "reserved": row.held,
+            }
             for need, row in zip(data["items"], rows, strict=True)
         ]
         data["shortfallTotal"] = sum(row.shortfall for row in rows)
+        holds = (
+            Reservation.objects.filter(request_item__request=case, status__in=ACTIVE)
+            .select_related("hospital", "reserved_by")
+            .prefetch_related("resource")
+        )
+        data["reservations"] = ReservationSerializer(holds, many=True).data
         return data
 
     def get_actions(self, case):

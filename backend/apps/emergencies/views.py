@@ -9,7 +9,15 @@ from apps.accounts.permissions import module_permission, own_hospital
 from apps.hospitals.models import DoctorShift
 from apps.hospitals.serializers import DoctorSerializer
 from apps.matching.candidates import candidates_for_case
+from apps.matching.models import Reservation
 from apps.matching.multi import match_hospitals
+from apps.matching.reservations import (
+    ReservationNotHeld,
+    ReservationUnavailable,
+    release,
+    release_expired,
+    reserve,
+)
 from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import EmergencyRequest, EmergencyStatus, RequestItem, RequestStatus, RequestStatusChange
@@ -22,6 +30,8 @@ from .serializers import (
     FeedEntrySerializer,
     FeedQuerySerializer,
     HospitalMatchSerializer,
+    ReservationInputSerializer,
+    ReservationSerializer,
 )
 from .services import ACTIVE, OutcomeNoteRequired, apply_case_action, create_case, escalate_overdue
 
@@ -92,6 +102,7 @@ class CaseDetailView(APIView):
 
     def get(self, request, reference):
         escalate_overdue()  # Story #35: the same request-time sweep as the list.
+        release_expired()  # Story #43: expired holds go back to stock before the figures are worked out.
         case = get_object_or_404(own_hospital(case_detail_queryset(), request.user), reference=reference)
         return Response(CaseDetailSerializer(case).data)
 
@@ -129,6 +140,7 @@ class CaseCandidatesView(APIView):
     permission_classes = [module_permission("emergencies")]
 
     def get(self, request, reference):
+        release_expired()  # Story #43: a released hold is stock again, so it is offered to other cases.
         case = get_object_or_404(
             own_hospital(EmergencyRequest.objects.select_related("hospital"), request.user),
             reference=reference,
@@ -161,3 +173,54 @@ class CaseActionView(APIView):
         except TransitionNotAllowed as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(CaseDetailSerializer(case_detail_queryset().get(pk=case.pk)).data)
+
+
+class CaseReservationsView(APIView):
+    """POST /api/emergencies/<reference>/reservations/ {"itemId", "quantity"} → 201 with the holds made (story
+    #43). Stock comes from the case's own hospital, and whatever is free there is taken, up to the quantity.
+    400 when nothing is free, or the quantity is more than the need has left. Emergencies: edit; another
+    hospital's case is 404."""
+
+    permission_classes = [module_permission("emergencies")]
+
+    def post(self, request, reference):
+        release_expired()  # Story #43: see CaseCandidatesView.
+        case = get_object_or_404(
+            own_hospital(EmergencyRequest.objects.select_related("hospital"), request.user),
+            reference=reference,
+        )
+        serializer = ReservationInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        item = case.items.filter(pk=data["itemId"]).first()
+        if item is None:
+            return Response(
+                {"itemId": ["No need with that id on this case."]}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            holds = reserve(item, hospital=case.hospital, quantity=data["quantity"], actor=request.user)
+        except ReservationUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ReservationSerializer(holds, many=True).data, status=status.HTTP_201_CREATED)
+
+
+class CaseReservationReleaseView(APIView):
+    """POST /api/emergencies/<reference>/reservations/<id>/release/ → the released hold (story #43). A hold
+    that is no longer held (allocated, released or expired) is 409 and changes nothing. Emergencies: edit."""
+
+    permission_classes = [module_permission("emergencies")]
+
+    def post(self, request, reference, pk):
+        release_expired()  # Story #43: a hold that has just run out is already expired, so it answers 409.
+        case = get_object_or_404(
+            own_hospital(EmergencyRequest.objects.all(), request.user), reference=reference
+        )
+        hold = get_object_or_404(
+            Reservation.objects.filter(request_item__request=case).select_related("hospital", "reserved_by"),
+            pk=pk,
+        )
+        try:
+            hold = release(hold, actor=request.user, reason="Released by staff")
+        except ReservationNotHeld as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(ReservationSerializer(hold).data)
