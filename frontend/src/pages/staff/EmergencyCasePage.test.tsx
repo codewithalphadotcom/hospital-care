@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fail, mockApi, mockStaffApi, userFor } from '../../test/mockApi'
 import { renderStaff } from '../../test/renderStaff'
 import { sampleCases } from '../../test/fixtures/emergencies'
+import type { StatusChange } from '../../api/emergencies'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -133,5 +134,111 @@ describe('EmergencyCasePage (story #34 status tracking)', () => {
     renderStaff('/staff/emergencies/EC-2026-9999')
     expect(await screen.findByText('No emergency case with that id.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '← All emergency cases' })).toHaveAttribute('href', '/staff/emergencies')
+  })
+})
+
+describe('EmergencyCasePage (story #35 escalation and closure)', () => {
+  const fulfilled = () => ({ ...sampleCases(new Date())[0]!, status: 'fulfilled' as const })
+  const opening: StatusChange = {
+    fromStatus: '',
+    toStatus: 'open',
+    action: 'create',
+    note: '',
+    actor: 'Dr. Ayesha Khan',
+    at: new Date().toISOString(),
+  }
+  const posted = (fetchMock: ReturnType<typeof mockStaffApi>['fetchMock']) => fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')
+
+  it('asks for an outcome note when closing, and sends nothing without one', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor', cases: [fulfilled()] })
+    renderStaff(CASE)
+
+    const region = await moves()
+    await userEvent.click(within(region).getByRole('button', { name: 'Close case' }))
+    const outcome = within(region).getByLabelText(/Outcome note/)
+    expect(outcome).toBeRequired()
+
+    await userEvent.type(outcome, '   ')
+    await userEvent.click(within(region).getByRole('button', { name: 'Close case' }))
+
+    expect(within(region).getByText('Add an outcome note to close the case.')).toBeInTheDocument()
+    expect(outcome).toHaveAttribute('aria-invalid', 'true')
+    expect(within(region).getByRole('button', { name: 'Close case' })).toBeInTheDocument()
+    expect(posted(fetchMock)).toHaveLength(0)
+  })
+
+  it('closes with an outcome note, then shows the outcome and no moves', async () => {
+    const { fetchMock } = mockStaffApi({ role: 'doctor', cases: [fulfilled()] })
+    renderStaff(CASE)
+
+    const region = await moves()
+    await userEvent.click(within(region).getByRole('button', { name: 'Close case' }))
+    await userEvent.type(within(region).getByLabelText(/Outcome note/), 'Two units to ward 3; stable')
+    await userEvent.click(within(region).getByRole('button', { name: 'Close case' }))
+
+    const outcome = await screen.findByRole('region', { name: 'Outcome' })
+    expect(within(outcome).getByText('Two units to ward 3; stable')).toBeInTheDocument()
+    expect(within(await details()).getByText('Closed')).toBeInTheDocument()
+    expect(await within(region).findByText('No moves from closed.')).toBeInTheDocument()
+    expect(await entryHeadings()).toEqual(['Case opened', 'Fulfilled → Closed'])
+    expect(JSON.parse(String(posted(fetchMock)[0]![1]!.body))).toEqual({ action: 'close', note: 'Two units to ward 3; stable' })
+  })
+
+  it('shows the server’s refusal of a close without a note on the outcome field', async () => {
+    mockStaffApi({ role: 'doctor', cases: [fulfilled()] })
+    renderStaff(CASE)
+
+    const region = await moves()
+    await userEvent.click(within(region).getByRole('button', { name: 'Close case' }))
+    await userEvent.type(within(region).getByLabelText(/Outcome note/), 'Done')
+
+    vi.restoreAllMocks()
+    mockApi({
+      'GET /auth/me/': { body: userFor('doctor') },
+      'POST /emergencies/:reference/actions/': fail(400, { note: ['Add an outcome note to close the case.'] }),
+    })
+    await userEvent.click(within(region).getByRole('button', { name: 'Close case' }))
+
+    expect(await within(region).findByText('Add an outcome note to close the case.')).toBeInTheDocument()
+    expect(within(region).getByLabelText(/Outcome note/)).toHaveAttribute('aria-invalid', 'true')
+    expect(within(await details()).getByText('Fulfilled')).toBeInTheDocument()
+  })
+
+  it('shows a closed case’s outcome, above its timeline', async () => {
+    const closed = { ...sampleCases(new Date())[0]!, status: 'closed' as const }
+    const close: StatusChange = {
+      fromStatus: 'fulfilled',
+      toStatus: 'closed',
+      action: 'close',
+      note: 'Stable on the ward; blood issued',
+      actor: 'Dr. Ayesha Khan',
+      at: new Date().toISOString(),
+    }
+    mockStaffApi({ role: 'nurse', cases: [closed], histories: { [closed.id]: [opening, close] } })
+    renderStaff(CASE)
+
+    const outcome = await screen.findByRole('region', { name: 'Outcome' })
+    expect(within(outcome).getByText('Stable on the ward; blood issued')).toBeInTheDocument()
+    expect(screen.getByText('No moves from closed.')).toBeInTheDocument()
+  })
+
+  it('says System for a move the system made, and labels an escalated case in words', async () => {
+    const escalated = { ...sampleCases(new Date())[0]!, status: 'escalated' as const }
+    const automatic: StatusChange = {
+      fromStatus: 'open',
+      toStatus: 'escalated',
+      action: 'escalate',
+      note: 'Not fulfilled within 30 minutes (automatic)',
+      actor: null,
+      at: new Date().toISOString(),
+    }
+    mockStaffApi({ role: 'doctor', cases: [escalated], histories: { [escalated.id]: [opening, automatic] } })
+    renderStaff(CASE)
+
+    expect(within(await details()).getByText('Escalated')).toBeInTheDocument()
+    const [, entry] = await entries()
+    expect(entry).toHaveTextContent('Open → Escalated')
+    expect(entry).toHaveTextContent('· System')
+    expect(within(entry!).getByText('Not fulfilled within 30 minutes (automatic)')).toBeInTheDocument()
   })
 })

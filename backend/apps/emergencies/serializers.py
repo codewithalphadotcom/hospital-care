@@ -116,9 +116,11 @@ class CaseDetailSerializer(CaseSerializer):
 
     history = StatusChangeSerializer(many=True, read_only=True)
     actions = serializers.SerializerMethodField()
+    outcome = serializers.SerializerMethodField()
 
     class Meta(CaseSerializer.Meta):
-        fields = [*CaseSerializer.Meta.fields, "history", "actions"]  # shortfallTotal: see to_representation
+        # shortfallTotal: see to_representation
+        fields = [*CaseSerializer.Meta.fields, "history", "actions", "outcome"]
 
     def to_representation(self, case):
         rows = local_availability(case)  # same order as the items below: both read case.items
@@ -132,3 +134,8 @@ class CaseDetailSerializer(CaseSerializer):
 
     def get_actions(self, case):
         return [action for status, action in REQUEST_LIFECYCLE.transitions if status == case.status]
+
+    def get_outcome(self, case):
+        """The note of the latest close (story #35), or None. Reads the prefetched history: no extra query."""
+        closes = [change for change in case.history.all() if change.action == "close"]
+        return closes[-1].note if closes else None

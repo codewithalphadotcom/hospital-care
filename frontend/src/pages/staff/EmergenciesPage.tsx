@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import { getCases, SEVERITIES, type EmergencyCase } from '../../api/emergencies'
 import { Panel } from '../../components/ui/Panel'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import { describeNeed, SEVERITY_TONE, STATUS_LABEL } from '../../features/emergencies/emergencies'
+import { CaseStatusLabel } from '../../features/emergencies/CaseStatusLabel'
+import { describeNeed, SEVERITY_TONE } from '../../features/emergencies/emergencies'
 import styles from '../../features/emergencies/Emergencies.module.css'
 import { NewCaseForm } from '../../features/emergencies/NewCaseForm'
 import { canEdit } from '../../features/staff/roles'
@@ -109,7 +110,9 @@ function CaseRow({ item }: { item: EmergencyCase }) {
         <StatusBadge tone={SEVERITY_TONE[item.severity]}>{SEVERITIES.find((s) => s.id === item.severity)?.label}</StatusBadge>
       </td>
       <td>{item.items.map(describeNeed).join(', ')}</td>
-      <td>{STATUS_LABEL[item.status]}</td>
+      <td>
+        <CaseStatusLabel status={item.status} />
+      </td>
       <td>
         <time dateTime={item.createdAt}>
           {formatShortDate(opened)}, {formatClock(opened)}

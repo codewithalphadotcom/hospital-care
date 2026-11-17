@@ -113,9 +113,9 @@ Users at a hospital see only its cases (another hospital's case → **404**); st
 
 | Method | Path | Body | Success | Story |
 |---|---|---|---|---|
-| GET | `/emergencies/` | – | `EmergencyCase[]`, most severe first, then oldest first | #30, #31 |
+| GET | `/emergencies/` | – | `EmergencyCase[]`, most severe first, then oldest first. Escalates overdue cases first (#35) | #30, #31, #35 |
 | POST | `/emergencies/` | `{severity, patientRef?, items}` | 201 `EmergencyCase` | #30, #31, #32 |
-| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions` and local availability | #30, #33, #34 |
+| GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions`, `outcome` and local availability. Escalates overdue cases first (#35) | #30, #33, #34, #35 |
 | POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
 
 ```ts
@@ -156,19 +156,20 @@ StatusChange = {
   toStatus: CaseStatus,
   action: CaseAction | 'create',
   note: string,                 // up to 500 characters, may be ''
-  actor: string | null,         // the user's name, or email if they have no name; null once they are removed
+  actor: string | null,         // the user's name, or email if they have no name; null for the system (an automatic
+                                //   escalation, #35) and for a user who has since been removed; the UI shows "System"
   at: string                    // ISO time
 }
 CaseAction = 'startMatching' | 'partiallyFulfil' | 'fulfil' | 'escalate' | 'resumeMatching' | 'close' | 'cancel'
 ```
 
 `POST /emergencies/<id>/actions/` takes `{"action": "startMatching", "note": "Blood bank called back"}`. `note` is
-optional. Responses:
+optional, except for `close` (see [Escalation and closure](#escalation-and-closure-35)). Responses:
 
 | Status | When |
 |---|---|
 | 200 | The move is made. The body is the case as it now is: its new `history` entry and its `actions`. |
-| 400 | `action` is not a move in the lifecycle, or `note` is over 500 characters. Nothing changes. |
+| 400 | `action` is not a move in the lifecycle, or `note` is over 500 characters. Closing with a blank note is `{"note": ["Add an outcome note to close the case."]}`. Nothing changes. |
 | 403 | The role can view emergencies but not change them (blood bank, pharmacist), or the user is not staff. |
 | 404 | No such case, or another hospital's case (admins: any hospital). Nothing changes. |
 | 409 | The lifecycle does not allow the move from the current status: `{"detail": "Can't close a case that is open."}`. Nothing changes and no timeline entry is written. |
@@ -221,6 +222,39 @@ EmergencyCaseDetail = EmergencyCase & {
 - A case with no hospital has `localAvailable` 0 for every need, so each need's shortfall is what is still unfulfilled.
 - The shortfalls are computed on read and never stored. The matching step (#38) reads them through
   `shortfall_items(case)` in `backend/apps/emergencies/availability.py`.
+
+### Escalation and closure (#35)
+
+**Escalation.** A **critical** case in status `open`, `matching` or `partiallyFulfilled` is escalated to `escalated` when
+its latest timeline entry (the time it entered that status) is older than `EMERGENCY_ESCALATION_MINUTES` minutes
+(default 30, a whole number of 1 or more; the server does not start on any other value). Other severities, and cases
+that are escalated, fulfilled, closed or cancelled, are never escalated automatically. A case resumed to `matching`
+after an escalation gets a fresh window, because its resume is a new entry.
+
+- The move is the same one a person makes (`escalate`), written through the same code: one timeline entry and one audit
+  record (`emergencyrequest.status_changed`), both with **no actor**. The note is
+  `Not fulfilled within 30 minutes (automatic)`, with the setting's value. The timeline shows the actor as **System**.
+- It runs as a request-time sweep: the case list and the case detail check and escalate overdue cases before they
+  answer, so staff see an up-to-date state. The check is one query when nothing is overdue. The sweep covers every
+  hospital's cases, whoever is reading.
+- A management command runs the same check and prints the count, for a scheduler later:
+  `python manage.py escalate_overdue_cases` → `Escalated 2 overdue cases.`. Running it twice escalates nothing the
+  second time.
+- Two runs at once do not escalate the same case twice: each candidate is locked with `skip_locked`, and its status and
+  latest entry are checked again under the lock.
+
+**Closing needs an outcome note.** `POST /emergencies/<id>/actions/` with `{"action": "close"}` needs a `note` that is not
+blank (spaces only count as blank). Without one the answer is **400** `{"note": ["Add an outcome note to close the case."]}`
+and nothing changes. A close the lifecycle refuses (a case that is already closed, say) is still 409, checked first.
+Other moves keep their note optional.
+
+The outcome note is the note of the close entry in the timeline. The detail shows it as `outcome`:
+
+```ts
+EmergencyCaseDetail = EmergencyCase & {
+  outcome: string | null        // the note of the close entry; null until the case is closed
+}
+```
 
 ## Demo data
 

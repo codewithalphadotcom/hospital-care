@@ -227,8 +227,9 @@ def test_the_detail_query_count_is_bounded_and_does_not_grow_with_the_needs(
 
     small = count_queries(doctor, reverse("emergency-case", args=["EC-2026-0001"]))
     url = reverse("emergency-case", args=["EC-2026-0002"])
-    # The case, its needs, its history, and one grouped count each for blood and beds, whatever the needs.
-    with django_assert_max_num_queries(5):
+    # The overdue check (one query, story #35), the case, its needs, its history, and one grouped count each
+    # for blood and beds, whatever the needs.
+    with django_assert_max_num_queries(6):
         big = count_queries(doctor, url)
 
     assert big == small

@@ -12,7 +12,7 @@ from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import EmergencyRequest, EmergencyStatus, RequestStatusChange
 from .serializers import CaseActionSerializer, CaseDetailSerializer, CaseInputSerializer, CaseSerializer
-from .services import apply_case_action, create_case
+from .services import OutcomeNoteRequired, apply_case_action, create_case, escalate_overdue
 
 
 def case_queryset():
@@ -54,6 +54,7 @@ class CaseListView(APIView):
     permission_classes = [module_permission("emergencies")]
 
     def get(self, request):
+        escalate_overdue()  # Story #35: reads sweep overdue cases first (see its ponytail note).
         cases = own_hospital(case_queryset(), request.user).by_priority()
         return Response(CaseSerializer(cases, many=True).data)
 
@@ -73,13 +74,15 @@ class CaseDetailView(APIView):
     permission_classes = [module_permission("emergencies")]
 
     def get(self, request, reference):
+        escalate_overdue()  # Story #35: the same request-time sweep as the list.
         case = get_object_or_404(own_hospital(case_detail_queryset(), request.user), reference=reference)
         return Response(CaseDetailSerializer(case).data)
 
 
 class CaseActionView(APIView):
     """POST /api/emergencies/<reference>/actions/ {"action": "startMatching", "note"?} → the updated case.
-    A move the lifecycle refuses is 409 and changes nothing. Emergencies: edit, at the case's hospital."""
+    A move the lifecycle refuses is 409 and changes nothing. Closing without an outcome note is 400 (story
+    #35). Emergencies: edit, at the case's hospital."""
 
     permission_classes = [module_permission("emergencies")]
 
@@ -89,6 +92,8 @@ class CaseActionView(APIView):
         data = serializer.validated_data
         try:
             case = apply_case_action(reference, data["action"], note=data["note"], actor=request.user)
+        except OutcomeNoteRequired as exc:
+            return Response({"note": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
         except TransitionNotAllowed as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(CaseDetailSerializer(case_detail_queryset().get(pk=case.pk)).data)

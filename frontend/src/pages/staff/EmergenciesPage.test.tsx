@@ -54,6 +54,16 @@ describe('EmergenciesPage (stories #30 create case, #32 requirements)', () => {
     expect(await screen.findByRole('region', { name: 'Status history' })).toBeInTheDocument()
   })
 
+  it('labels an escalated case in words in the list (story #35)', async () => {
+    mockStaffApi({ role: 'nurse', cases: [{ ...caseFor('EC-2026-0001', 'critical'), status: 'escalated' }, caseFor('EC-2026-0002', 'high')] })
+    renderStaff('/staff/emergencies')
+
+    const rows = within(await table()).getAllByRole('row').slice(1)
+    expect(within(rows[0]!).getByText('Escalated')).toBeInTheDocument()
+    expect(within(rows[1]!).queryByText('Escalated')).toBeNull()
+    expect(within(rows[1]!).getByText('Open')).toBeInTheDocument()
+  })
+
   it('shows cases in the order the server sends them, without re-sorting (#31)', async () => {
     // Deliberately not severity order: the page shows what it is given.
     mockStaffApi({ role: 'nurse', cases: [caseFor('EC-2026-0004', 'low'), caseFor('EC-2026-0001', 'critical'), caseFor('EC-2026-0003', 'moderate')] })

@@ -100,9 +100,19 @@ type StaffApiOptions = {
   networkDown?: boolean
   /** Use these emergency cases instead of the sample ones. */
   cases?: EmergencyCase[]
+  /** Replace a case's timeline (by reference), e.g. to show an entry the system made. */
+  histories?: Record<string, StatusChange[]>
 }
 
-export function mockStaffApi({ role, erDown = false, board: customBoard, publicStatus, networkDown = false, cases: customCases }: StaffApiOptions) {
+export function mockStaffApi({
+  role,
+  erDown = false,
+  board: customBoard,
+  publicStatus,
+  networkDown = false,
+  cases: customCases,
+  histories: customHistories,
+}: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
   const units = sampleBloodUnits(now)
@@ -119,17 +129,21 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
     at: c.createdAt,
   })
   const histories = new Map<string, StatusChange[]>(cases.map((c) => [c.id, [openingEntry(c)]]))
+  for (const [reference, entries] of Object.entries(customHistories ?? {})) histories.set(reference, entries)
   const findCase = (reference: string) => cases.find((c) => c.id === reference)
   /** The case as the server returns it: each need with what this hospital has (story #33), from the sample stock. */
   const detailOf = (c: EmergencyCase): EmergencyCaseDetail => {
     const local = sampleLocalAvailable[c.id] ?? []
     const items = c.items.map((need, i) => ({ ...need, localAvailable: local[i] ?? 0, shortfall: Math.max(0, need.quantity - (local[i] ?? 0)) }))
+    const history = histories.get(c.id) ?? []
+    const closes = history.filter((change) => change.action === 'close')
     return {
       ...c,
       items,
       shortfallTotal: items.reduce((sum, need) => sum + need.shortfall, 0),
-      history: histories.get(c.id) ?? [],
+      history,
       actions: actionsFor(c.status),
+      outcome: closes.length ? closes[closes.length - 1].note : null,
     }
   }
   const gate =(module: Module, reply: () => Reply): Route => () =>
@@ -240,6 +254,7 @@ export function mockStaffApi({ role, erDown = false, board: customBoard, publicS
       const { action, note } = body as { action: CaseAction; note: string }
       const next = nextStatus(found.status, action)
       if (!next) return fail(409, { detail: `Can't ${action} a case that is ${STATUS_LABEL[found.status].toLowerCase()}.` })
+      if (action === 'close' && !note.trim()) return fail(400, { note: ['Add an outcome note to close the case.'] })
       const entry: StatusChange = {
         fromStatus: found.status,
         toStatus: next,

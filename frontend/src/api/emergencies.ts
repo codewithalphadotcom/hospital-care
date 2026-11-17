@@ -59,6 +59,8 @@ export interface EmergencyCaseDetail extends EmergencyCase {
   shortfallTotal: number
   history: StatusChange[]
   actions: CaseAction[]
+  /** The outcome note from the close (story #35): required to close, so set once the case is closed. Else null. */
+  outcome: string | null
 }
 
 export const SEVERITIES: readonly { id: Severity; label: string; hint: string }[] = [

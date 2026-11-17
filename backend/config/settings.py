@@ -4,12 +4,25 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def env_list(name, default=""):
     return [v.strip() for v in os.environ.get(name, default).split(",") if v.strip()]
+
+
+def positive_int_env(name, default):
+    """A whole number of 1 or more from an environment variable. A bad value stops the server at startup."""
+    raw = os.environ.get(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ImproperlyConfigured(f"{name} must be a whole number of 1 or more, not {raw!r}.") from None
+    if value < 1:
+        raise ImproperlyConfigured(f"{name} must be a whole number of 1 or more, not {raw!r}.")
+    return value
 
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key-change-me")
@@ -127,3 +140,6 @@ BLOOD_NEAR_EXPIRY_DAYS = int(os.environ.get("BLOOD_NEAR_EXPIRY_DAYS", "3"))  # s
 BLOOD_LOW_STOCK_UNITS = int(os.environ.get("BLOOD_LOW_STOCK_UNITS", "5"))  # per group and component
 BLOOD_MIN_DONATION_INTERVAL_DAYS = int(os.environ.get("BLOOD_MIN_DONATION_INTERVAL_DAYS", "56"))  # story #21
 BLOOD_APPOINTMENT_SLOT_MINUTES = int(os.environ.get("BLOOD_APPOINTMENT_SLOT_MINUTES", "30"))  # story #22
+
+# A critical case still unfulfilled after this many minutes in its current status is escalated (story #35).
+EMERGENCY_ESCALATION_MINUTES = positive_int_env("EMERGENCY_ESCALATION_MINUTES", 30)

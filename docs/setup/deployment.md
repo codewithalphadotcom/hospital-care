@@ -40,6 +40,15 @@ If Render gives the API a different address than `https://hospital-care-api.onre
 On Render, set `CSRF_TRUSTED_ORIGINS` (and `CORS_ALLOWED_ORIGINS`) to the Vercel URL, e.g.
 `https://hospital-care.vercel.app`.
 
+### Emergency escalation (story #35)
+Critical emergency cases that stay unfulfilled are escalated automatically. The time is set by
+`EMERGENCY_ESCALATION_MINUTES` (default `30`; a whole number of 1 or more, and the server refuses to start on any other
+value). Set it on Render's **Environment** tab to change it. Nothing else is needed.
+
+The free Render plan has no scheduled jobs, so the API runs the check itself whenever someone opens the case list or a
+case. A scheduler can run the same check with `python manage.py escalate_overdue_cases`, which prints how many cases it
+escalated. Running it twice escalates nothing the second time.
+
 ### Demo data
 The Render build runs `seed_demo` (it only adds data to empty tables), so staging has the demo hospitals,
 beds, blood units and one login per role (`admin@`, `doctor@`, `nurse@`, `bloodbank@`, `pharmacist@`,

@@ -304,6 +304,19 @@
   border-left: 3px solid var(--rule);
 }
 
+/* The outcome of a closed case (story #35): the note as written, its line breaks kept, in larger bold text. */
+.outcome {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  white-space: pre-line;
+}
+
+.outcomeForm {
+  display: grid;
+  gap: var(--space-4);
+}
+
 .entryNote {
   margin: 0;
 }
