@@ -118,7 +118,7 @@ Users at a hospital see only its cases (another hospital's case → **404**); st
 | GET | `/emergencies/<id>/` | – | `EmergencyCaseDetail`: the case with its `history`, `actions`, `outcome` and local availability. Escalates overdue cases first (#35) | #30, #33, #34, #35 |
 | POST | `/emergencies/<id>/actions/` | `{action, note?}` | 200 `EmergencyCaseDetail`, after the move (see [Status](#status-and-its-timeline-34)) | #34 |
 | GET | `/emergencies/feed/?type=blood\|bed\|equipment\|operatingRoom` | – | `FeedEntry[]`: every hospital's active requests of that type, most urgent first, at most 100. Escalates overdue cases first (#35) | #36, #38 |
-| GET | `/emergencies/<id>/candidates/` | – | `CandidatesResponse`: the other hospitals that can supply each short need (see [Sources in the network](#sources-in-the-network-38)). Does not escalate | #38 |
+| GET | `/emergencies/<id>/candidates/` | – | `CandidatesResponse`: the other hospitals that can supply each short need, and the hospitals judged across all of them (see [Sources in the network](#sources-in-the-network-38) and [Hospitals across the needs](#hospitals-across-the-needs-42)). Does not escalate | #38, #42 |
 
 ```ts
 EmergencyCase = {
@@ -319,7 +319,8 @@ the case's hospital, so another hospital's case is **404** and a patient is **40
 ```ts
 CandidatesResponse = {
   reference: string,               // "EC-2026-0001"
-  items: CandidateItem[]           // only the short needs; [] when everything is covered locally
+  items: CandidateItem[],          // only the short needs; [] when everything is covered locally
+  hospitals: HospitalMatch[]       // the hospitals across all the short needs at once (#42); [] when nothing is short
 }
 CandidateItem = {
   itemId: number,                  // the RequestItem's id
@@ -374,6 +375,45 @@ ScoreFactor = {
 - **Read only.** Nothing is stored, and the endpoint does not run the overdue sweep (#35).
 - **Queries:** a fixed number: the case with its needs and local stock (as in #33), one grouped query per short need, and
   one hospital fetch for all the candidates together. It does not query per hospital.
+
+## Hospitals across the needs (#42)
+
+`hospitals` in `GET /emergencies/<id>/candidates/` judges each hospital that is a candidate for at least one short need
+across all of those needs at once: which needs it covers in full, and what it is missing for the rest. Same access
+rule as the sources above. It adds no query: it is worked out from the candidates already fetched.
+
+```ts
+HospitalMatch = {
+  rank: number,                    // 1-based position in the list
+  hospital: { id: number, name: string },
+  complete: boolean,               // covers every short need
+  recommended: boolean,            // true only on rank 1, and only when complete
+  coverage: string,                // "2 of 3": the needs covered, of the short needs
+  coveredCount: number,
+  totalNeeds: number,              // the number of short needs
+  score: number,                   // the mean of its #41 candidate scores over the needs it has candidates for, one decimal
+  distanceKm: number | null,       // as on a candidate (#39)
+  travelMinutes: number | null,
+  covered: { itemId: number, need: string }[],
+  unmet: { itemId: number, need: string, missing: number, available: number }[]
+    // every need not covered in full: partial ones (available > 0) and ones it has none of (available 0)
+}
+```
+
+- **Order:** complete first; then the most needs covered; then the score, highest first; then the nearer hospital (no
+  distance last); then hospital id. Ties are stable.
+- **Shared stock.** Needs that draw on the same stock at one hospital (two O− red-cell lines, two ICU bed lines, two
+  lines for the same operating-room capability) share its count. Each is judged in item order: the first line is covered
+  first, and the next sees what is left. So one hospital is not credited twice with the same units. `available` in
+  `unmet` is what is left for that line.
+- **Known limit: blood across groups.** The candidates for blood are grouped per need, so two needs with different
+  groups (for example O− and A+ red cells) can both count the same donor unit at a hospital. Allocation (#45) resolves
+  this exactly.
+- **Known limit: operating rooms with two capabilities.** A room that serves two capabilities counts for each of them.
+  Two needs of different capabilities can then both count it. Allocation (#45) resolves this too.
+- **The score only breaks ties** between hospitals that cover the same number of needs. A complete hospital ranks above
+  any partial one, whatever its score.
+- **Empty** (`[]`) when nothing is short. A hospital with none of the needs does not appear.
 
 ## Equipment (Sprint 4)
 
