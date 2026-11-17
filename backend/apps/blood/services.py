@@ -124,7 +124,7 @@ def expire_overdue_units(now=None) -> int:
         with transaction.atomic():
             unit = BloodUnit.objects.select_for_update().get(pk=pk)
             if unit.status in expirable and unit.expires_at <= now:
-                change_status(unit, "expire", actor=None, reason="Past its expiry date")
+                change_status(unit, "expire", actor=None, reason="Past its expiry date", held_ok=True)
                 count += 1
     return count
 
