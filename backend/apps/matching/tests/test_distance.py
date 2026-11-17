@@ -15,6 +15,17 @@ def test_one_degree_of_longitude_at_the_equator_is_about_111_km():
     assert 111.0 <= km <= 111.4
 
 
+@pytest.mark.parametrize(
+    ("a", "b", "published_km"),
+    [
+        ((51.5074, -0.1278), (48.8566, 2.3522), 344),  # London to Paris, a widely published reference
+        ((24.8607, 67.0011), (31.5204, 74.3587), 1030),  # Karachi to Lahore, straight line
+    ],
+)
+def test_known_city_pairs_match_published_straight_line_distances(a, b, published_km):
+    assert haversine_km(*a, *b) == pytest.approx(published_km, rel=0.01)
+
+
 def test_distance_is_symmetric():
     a = haversine_km(24.8607, 67.0011, 31.5204, 74.3587)
     b = haversine_km(31.5204, 74.3587, 24.8607, 67.0011)
@@ -35,6 +46,17 @@ def test_estimated_travel_minutes(distance_km, speed_kmh, expected_minutes):
 
 def test_estimated_travel_minutes_defaults_to_40kmh():
     assert estimated_travel_minutes(40.0) == pytest.approx(60.0)
+
+
+def test_default_speed_is_configurable_in_settings(settings):
+    settings.MATCHING_AVERAGE_SPEED_KMH = 20.0
+    assert estimated_travel_minutes(40.0) == pytest.approx(120.0)
+
+
+@pytest.mark.parametrize(("distance_km", "speed_kmh"), [(10.0, 0.0), (10.0, -5.0), (-1.0, 40.0)])
+def test_estimated_travel_minutes_refuses_impossible_inputs(distance_km, speed_kmh):
+    with pytest.raises(ValueError):
+        estimated_travel_minutes(distance_km, speed_kmh)
 
 
 @pytest.mark.django_db

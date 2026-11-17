@@ -9,6 +9,13 @@ PASSWORD = "Strong-pass-123"
 
 
 @pytest.fixture(autouse=True)
+def fast_password_hashing(settings):
+    """Django's default hasher is deliberately slow (over a million PBKDF2 rounds) and almost every test
+    creates a user, so it dominated the suite's run time. Tests don't need real hashing strength."""
+    settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
+@pytest.fixture(autouse=True)
 def fresh_cache():
     """Failed-login counts live in the cache; every test starts with none."""
     cache.clear()

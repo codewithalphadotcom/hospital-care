@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -12,8 +13,12 @@ def env_list(name, default=""):
     return [v.strip() for v in os.environ.get(name, default).split(",") if v.strip()]
 
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key-change-me")
+DEV_SECRET_KEY = "dev-only-insecure-key-change-me"
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", DEV_SECRET_KEY)
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
+if not DEBUG and SECRET_KEY == DEV_SECRET_KEY:
+    # Refuse to start rather than sign sessions with a key that is published in this repo.
+    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY when DJANGO_DEBUG is false.")
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 
 INSTALLED_APPS = [
@@ -113,7 +118,9 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173")
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "http://localhost:5173")
 
-# Session auth across domains (Vercel frontend → Render API), decided in the login story.
+# Staging cookies are HTTPS-only. The browser talks only to Vercel, which proxies /api to Render
+# (frontend/vercel.json, docs/setup/deployment.md), so the cookies belong to the Vercel domain. SameSite=None
+# is kept so a frontend calling the Render URL directly still sends the session cookie.
 # Locally (DEBUG) both run on localhost, so the default SameSite=Lax cookies work over plain http.
 if not DEBUG:
     SESSION_COOKIE_SAMESITE = "None"
@@ -124,6 +131,8 @@ if not DEBUG:
 
 # Blood bank rules (Sprint 3). Each can be overridden with an environment variable.
 BLOOD_NEAR_EXPIRY_DAYS = int(os.environ.get("BLOOD_NEAR_EXPIRY_DAYS", "3"))  # story #19
-BLOOD_LOW_STOCK_UNITS = int(os.environ.get("BLOOD_LOW_STOCK_UNITS", "5"))  # per group and component
 BLOOD_MIN_DONATION_INTERVAL_DAYS = int(os.environ.get("BLOOD_MIN_DONATION_INTERVAL_DAYS", "56"))  # story #21
 BLOOD_APPOINTMENT_SLOT_MINUTES = int(os.environ.get("BLOOD_APPOINTMENT_SLOT_MINUTES", "30"))  # story #22
+
+# Matching rules (Sprint 6). Simulated travel time uses this average city driving speed (story #39).
+MATCHING_AVERAGE_SPEED_KMH = float(os.environ.get("MATCHING_AVERAGE_SPEED_KMH", "40"))

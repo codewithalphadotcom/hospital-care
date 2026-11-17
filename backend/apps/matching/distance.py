@@ -7,8 +7,9 @@ average city driving speed. No real routing or traffic data — see docs/aidlc/i
 import math
 from decimal import Decimal
 
+from django.conf import settings
+
 EARTH_RADIUS_KM = 6371.0
-DEFAULT_AVERAGE_SPEED_KMH = 40.0
 
 
 def haversine_km(
@@ -23,11 +24,15 @@ def haversine_km(
     return EARTH_RADIUS_KM * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def estimated_travel_minutes(
-    distance_km: float, average_speed_kmh: float = DEFAULT_AVERAGE_SPEED_KMH
-) -> float:
-    """Simulated travel time in minutes: distance over an assumed average city driving speed."""
-    return (distance_km / average_speed_kmh) * 60
+def estimated_travel_minutes(distance_km: float, average_speed_kmh: float | None = None) -> float:
+    """Simulated travel time in minutes: distance over an assumed average city driving speed.
+    The speed defaults to settings.MATCHING_AVERAGE_SPEED_KMH (40 km/h unless overridden)."""
+    speed = settings.MATCHING_AVERAGE_SPEED_KMH if average_speed_kmh is None else average_speed_kmh
+    if speed <= 0:
+        raise ValueError(f"Average speed must be positive, got {speed} km/h.")
+    if distance_km < 0:
+        raise ValueError(f"Distance can't be negative, got {distance_km} km.")
+    return (distance_km / speed) * 60
 
 
 def hospital_distance(hospital_a, hospital_b) -> float:

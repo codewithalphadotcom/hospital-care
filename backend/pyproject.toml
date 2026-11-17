@@ -1,6 +1,8 @@
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py"]
+# WhiteNoise warns on every request when collectstatic hasn't run (true in dev and CI). Hide only that one.
+filterwarnings = ["ignore:No directory at:UserWarning"]
 
 [tool.ruff]
 line-length = 110
