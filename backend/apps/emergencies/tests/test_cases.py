@@ -97,7 +97,13 @@ def test_a_case_needs_a_severity_and_one_to_ten_needs(client_as, body, field):
         ({"type": "bed", "quantity": 1}, "bedType"),
         ({"type": "bed", "bedType": "icu", "quantity": 6}, "quantity"),
         ({"type": "bed", "bedType": "icu", "quantity": 0}, "quantity"),
-        ({"type": "equipment", "quantity": 1}, "type"),
+        ({"type": "xray", "quantity": 1}, "type"),
+        ({"type": "equipment", "quantity": 1}, "equipmentType"),
+        ({"type": "equipment", "equipmentType": "toaster", "quantity": 1}, "equipmentType"),
+        ({"type": "equipment", "equipmentType": "ventilator", "quantity": 6}, "quantity"),
+        ({"type": "operatingRoom", "quantity": 1}, "capability"),
+        ({"type": "operatingRoom", "capability": "dental", "quantity": 1}, "capability"),
+        ({"type": "operatingRoom", "capability": "cardiac", "quantity": 4}, "quantity"),
     ],
 )
 def test_each_need_is_validated_for_its_type(client_as, item, field):
@@ -110,6 +116,28 @@ def test_a_bed_need_ignores_blood_fields_sent_with_it(client_as):
     create(client_as(Role.DOCTOR), {"severity": "high", "items": [{**BED, "group": "O-"}]})
     item = RequestItem.objects.get()
     assert (item.resource_type, item.bed_type, item.blood_group, item.fulfilled) == ("bed", "icu", "", 0)
+
+
+def test_equipment_and_operating_room_needs_are_stored_with_only_their_own_field(client_as):
+    """Story #32 completed: a ventilator line and a cardiac theatre line. Other types' fields stay blank."""
+    vent = {"type": "equipment", "equipmentType": "ventilator", "quantity": 2}
+    room = {"type": "operatingRoom", "capability": "cardiac", "quantity": 1}
+    res = create(client_as(Role.DOCTOR), {"severity": "high", "items": [vent, room]})
+
+    assert res.status_code == 201
+    assert res.json()["items"] == [vent, room]
+    ventilators, theatre = RequestItem.objects.order_by("id")
+    assert (ventilators.resource_type, ventilators.equipment_type, ventilators.capability) == (
+        "equipment",
+        "ventilator",
+        "",
+    )
+    assert (ventilators.blood_group, ventilators.component, ventilators.bed_type) == ("", "", "")
+    assert (theatre.resource_type, theatre.capability, theatre.equipment_type) == (
+        "operatingRoom",
+        "cardiac",
+        "",
+    )
 
 
 # ── Access ──────────────────────────────────────────────────────────────────────────────────────

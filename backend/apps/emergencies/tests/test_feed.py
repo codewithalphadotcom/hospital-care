@@ -135,7 +135,7 @@ def test_type_bed_lists_bed_requests_and_shows_only_their_bed_needs(client_as, m
     assert [need["type"] for need in blood_entry["needs"]] == ["blood"]
 
 
-@pytest.mark.parametrize("type_", ["equipment", "BLOOD"])
+@pytest.mark.parametrize("type_", ["xray", "BLOOD"])
 def test_an_unknown_type_is_400(client_as, type_):
     res = feed(client_as(Role.DOCTOR), type_)
 
