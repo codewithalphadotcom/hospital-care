@@ -23,7 +23,7 @@ from apps.matching.reservations import (
 )
 from apps.resources.state_machine import TransitionNotAllowed
 
-from .models import TRANSFER_LIFECYCLE, Transfer, TransferStatus, TransferStatusChange
+from .models import LIVE, TRANSFER_LIFECYCLE, Transfer, TransferStatus, TransferStatusChange
 
 # Only stock that physically moves between hospitals. Beds and operating rooms are patient transfer (#63 to
 # #65).
@@ -250,6 +250,25 @@ def cancel(transfer: Transfer, *, actor, reason: str = "", note: str = "") -> Tr
         if hold.status == ReservationStatus.HELD:
             release(hold, actor=actor, reason=f"Transfer #{transfer.pk} cancelled", transfer_ok=True)
     return _move(transfer, "cancel", actor=actor, note=note or reason, reason=reason)
+
+
+@transaction.atomic
+def cancel_for_case(case: EmergencyRequest, *, actor, reason: str) -> int:
+    """Cancel every unfinished transfer of a case that is being closed or cancelled, releasing its holds, and
+    return how many. Called from the case move, which has already checked the actor, so no per-transfer
+    check: without this, a closed case's pinned holds would never expire and the supplier's stock would stay
+    locked. The caller holds the case lock and the transaction."""
+    unfinished = Transfer.objects.select_for_update().filter(
+        request_item__request=case, status__in=(TransferStatus.REQUESTED, *LIVE)
+    )
+    cancelled = 0
+    for transfer in unfinished.order_by("id"):
+        for hold in _holds(transfer):
+            if hold.status == ReservationStatus.HELD:
+                release(hold, actor=actor, reason=f"Transfer #{transfer.pk} cancelled", transfer_ok=True)
+        _move(transfer, "cancel", actor=actor, note=reason, reason=reason)
+        cancelled += 1
+    return cancelled
 
 
 @transaction.atomic
