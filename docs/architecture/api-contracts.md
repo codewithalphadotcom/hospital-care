@@ -26,6 +26,9 @@ B01 (#47): it lets a role use the transfer endpoints at all. Who may ask, approv
 (see [transfers](api.md#transfers-47-48-49)).
 
 `ambulances` (B04, #50) is the ambulance registry: admin and nurse edit, doctor views. Blood bank and pharmacist have no access (see [ambulances](api.md#ambulances-b04-50)).
+Trips (B05, #51) add two endpoints under it: `POST /transfers/<id>/trips/` and `POST /trips/<id>/actions/`. They need edit on
+`ambulances` at the supplying hospital, so the receiving hospital's staff (and blood bank, which has no `ambulances` access)
+can't send or step a trip. Trips add no module (see [trips](api.md#trips-b05-51)).
 
 `orBookings` (story #29) is the module for booking and cancelling operating room slots. It has no nav item of its own: the day schedule is part of operating rooms.
 

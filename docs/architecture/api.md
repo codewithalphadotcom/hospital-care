@@ -710,16 +710,21 @@ Transfer = {
 - **Case detail** gains `transfers`: the case's transfers, newest first, in the same shape, with the moves this user may make.
   Each reservation gains `transfer`, as above.
 - **Admin:** read-only. Transfers are asked, answered and received in the app, so every move is checked and recorded.
+- **Trips (#51).** While an ambulance carries a transfer, no manual move is offered and the move is **409**
+  `{"detail": "An ambulance is carrying this transfer. Use the trip's steps instead."}`: `approve`, `reject`, `dispatch`,
+  `startTransit`, `deliver` and `cancel` alike. A case that closes or is cancelled while its trip is on the road is **409**
+  too, and nothing changes. The transfer gains `trip` (its latest [trip](#trips-51), or null), `etaMinutes` (the supplier to
+  receiver estimate) and, when it is approved and the user may dispatch, the move `dispatchAmbulance` in `actions`.
 
 ## Ambulances (B04, #50)
 
 The ambulance registry: each ambulance at its base hospital, with its type and status. Access: admin and nurse **edit**,
 doctor **view**; other roles 403. Staff see their own hospital's ambulances; admins see all. Every registration and move is
-audit-logged. Dispatch and trips come with [B05](../aidlc/bolts/B05-ambulance-dispatch.md).
+audit-logged. Trips use the same ambulances: see [Trips](#trips-51).
 
 | Method | Path | Body | Success |
 |---|---|---|---|
-| GET | `/ambulances/?type=&status=&q=` | – | `Ambulance[]`, by type then asset tag (`q` searches the asset tag) |
+| GET | `/ambulances/?type=&status=&q=&hospital=` | – | `Ambulance[]`, by type then asset tag (`q` searches the asset tag, `hospital` is a hospital id) |
 | POST | `/ambulances/` | `{identifier, type, hospitalId?}` | 201 `Ambulance` |
 | POST | `/ambulances/<id>/actions/` | `{action, reason?}` | 200 `Ambulance` |
 
@@ -727,9 +732,10 @@ audit-logged. Dispatch and trips come with [B05](../aidlc/bolts/B05-ambulance-di
 Ambulance = {
   id: number, identifier: string,   // asset tag, stored upper-case, unique within a hospital (400 otherwise)
   type: 'basic' | 'advanced' | 'patientTransport',
-  status: 'available' | 'maintenance' | 'outOfService',  // a new ambulance starts available
+  status: 'available' | 'dispatched' | 'maintenance' | 'outOfService',  // a new ambulance starts available; 'dispatched' is "On trip"
   statusSince: string,
-  hospital: string | null           // the base hospital's name
+  hospital: string | null,          // the base hospital's name
+  trip: { id: number, status: 'dispatched' | 'enRoute' | 'arrived', transferId: number } | null  // the trip on the road, if any
 }
 ```
 
@@ -739,7 +745,9 @@ Ambulance = {
 - **Moves** (the lifecycle is in `apps/ambulances/models.py`): `startMaintenance` (available → maintenance),
   `finishMaintenance` (maintenance → available), `outOfService` (available or maintenance → out of service) and
   `returnToService` (out of service → maintenance). A move the status doesn't allow is **409** `{"detail": "Can't
-  outOfService a vehicle that is out of service."}` and changes nothing. Unknown action → 400.
+  outOfService a vehicle that is out of service."}` and changes nothing. Unknown action → 400. `dispatch` and `release`
+  are the trip's moves: this endpoint refuses them with **409** `{"detail": "A trip moves this vehicle. Use the transfer's
+  trip instead."}`, and a vehicle on a trip can't be moved by hand (**409**, "Can't startMaintenance a vehicle that is on trip.").
 - Another hospital's ambulance is **404** for a non-admin. A role without access gets **403**, signed out too.
 - **Audit:** `ambulance.registered` (identifier, type, status) and `ambulance.status_changed` (status before and after,
   with the optional `reason`).
@@ -872,6 +880,50 @@ Notification = {
   every 30 seconds while the tab is visible, and once when it is shown again. A 401 or 403 stops polling. There is no read-all
   endpoint: each alert is marked read on its own.
 - **Admin.** Read-only. Rows are written by `notify` and only `read_at` is set by the API.
+
+## Trips (B05, #51)
+
+An approved transfer is carried by one available ambulance from its supplying hospital. The trip records the ETA, who sent
+it and when, and steps through the road: dispatched → en route → arrived → completed. The trip is simulated: buttons, no
+GPS. Access: edit on `ambulances` at the **supplying** hospital (admin: any hospital) for dispatch and every step. The
+receiving hospital sees the trip on the transfer, read only. Outsiders get 404. Spec:
+[B05](../aidlc/bolts/B05-ambulance-dispatch.md) and [its inception spec](../aidlc/inception/2026-11-18-ambulance-dispatch.md).
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| POST | `/transfers/<id>/trips/` | `{ambulance}` | 201 `Trip` |
+| POST | `/trips/<id>/actions/` | `{action: "depart" \| "arrive" \| "complete", note?}` | 200 `Trip`, after the step |
+
+```ts
+Trip = {
+  id: number, transferId: number,
+  status: 'dispatched' | 'enRoute' | 'arrived' | 'completed',
+  ambulance: { id: number, identifier: string, type: string },
+  etaMinutes: number,               // set once, at dispatch: the supplier-to-receiver estimate, rounded to whole minutes
+  dispatchedBy: string,             // the person's name, or their email
+  dispatchedAt: string, departedAt: string | null, arrivedAt: string | null, completedAt: string | null,
+  actions: ('depart' | 'arrive' | 'complete')[]   // the steps this user may take now
+}
+```
+
+- **Dispatch (201).** The transfer must be **approved** (**409**, "Can't dispatch a transfer that is requested."). The
+  ambulance must be **available** (**409**, "Can't dispatch a vehicle that is on trip."). It must be based at the transfer's
+  supplier (**400** `{"ambulance": [...]}`). A transfer has at most one active trip and an ambulance has at most one: a second
+  is **409**, and the database enforces both (partial unique constraints). A transfer or ambulance the user can't see is
+  **404**. A user who may not edit ambulances at the supplier is **403** (the receiving hospital included). A missing
+  ambulance is 400. Refusals change nothing.
+- **Steps.** `depart`: dispatched → en route, and the transfer moves to **in transit** through the transfer service.
+  `arrive`: en route → arrived; the transfer stays in transit. `complete`: arrived → completed; the ambulance goes back to
+  **available**, and the transfer **stays in transit**: receipt is the receiver's confirmation (B03), never a side effect of
+  a trip. Any other step is **409** `{"detail": "Can't arrive a trip that is dispatched."}` and changes nothing. A completed
+  trip is final.
+- **Locks.** Every write is one `transaction.atomic()` that locks the case, the need, the transfer, then the trip and the
+  ambulance (the order transfers use). A failure after either move undoes both.
+- **Audit:** `trip.dispatched`, `trip.departed`, `trip.arrived`, `trip.completed`, each with the status before and after,
+  plus the moves the trip makes: `ambulance.status_changed` (dispatch and release), `transfer.dispatched` and
+  `transfer.inTransit`.
+- **Lists.** `GET /ambulances/` shows each ambulance's `trip`. Dispatch offers only available ambulances at the supplier
+  (`?status=available&hospital=<supplier id>`).
 
 ## Demo data
 

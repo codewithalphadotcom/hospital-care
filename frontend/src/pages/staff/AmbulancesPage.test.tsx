@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mockStaffApi } from '../../test/mockApi'
+import { mockStaffApi, sampleAmbulances } from '../../test/mockApi'
 import { renderStaff } from '../../test/renderStaff'
 
 afterEach(() => vi.restoreAllMocks())
@@ -135,5 +135,26 @@ describe('AmbulancesPage (story #50 Ambulance registry)', () => {
       'AMB-01: That move is no longer allowed, because the status changed first. The list shows the latest status.',
     )
     expect(within(rowFor('AMB-01')).getByText('Out of service')).toBeInTheDocument()
+  })
+})
+
+describe('AmbulancesPage: trips (story #51)', () => {
+  it('shows the ambulance on a trip with its transfer, offers no status change for it, and filters by On trip', async () => {
+    const now = new Date()
+    const onTrip = sampleAmbulances(now).map((a) =>
+      a.identifier === 'AMB-01' ? { ...a, status: 'dispatched' as const, trip: { id: 4, status: 'enRoute' as const, transferId: 2 } } : a,
+    )
+    mockStaffApi({ role: 'nurse', ambulances: onTrip })
+    renderStaff('/staff/ambulances')
+    await screen.findByRole('table', { name: 'Ambulances' })
+
+    const row = rowFor('AMB-01')
+    expect(within(row).getByText('On trip')).toBeInTheDocument()
+    expect(within(row).getByText('Carrying transfer #2, en route')).toBeInTheDocument()
+    expect(within(row).queryByRole('button')).toBeNull()
+
+    const statuses = within(screen.getByRole('group', { name: 'Show status' }))
+    await userEvent.click(statuses.getByRole('button', { name: /On trip/ }))
+    expect(tags()).toEqual(['AMB-01'])
   })
 })

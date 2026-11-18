@@ -165,7 +165,7 @@ erDiagram
     TransferRequest }o--|| Hospital : "supplied by"
     TransferRequest ||--|{ TransferItem : moves
     TransferItem }o--|| BloodUnit : unit
-    TransferRequest |o--o| Trip : "carried by"
+    TransferRequest ||--o{ Trip : "carried by"
     Ambulance ||--o{ Trip : drives
     Hospital ||--o{ Ambulance : "based at"
     Hospital ||--o{ Equipment : owns
@@ -236,12 +236,14 @@ erDiagram
         string identifier "unique per hospital, any case"
         string type "basic|advanced|patientTransport"
         bigint hospital_id FK "base hospital"
-        string status "available|maintenance|outOfService"
+        string status "available|dispatched|maintenance|outOfService"
     }
     Trip {
         bigint id PK
-        bigint ambulance_id FK
+        bigint transfer_id FK "at most one active trip per transfer"
+        bigint ambulance_id FK "at most one active trip per ambulance"
         string status "dispatched|enRoute|arrived|completed"
+        int eta_minutes "set at dispatch"
     }
     Equipment {
         bigint id PK
