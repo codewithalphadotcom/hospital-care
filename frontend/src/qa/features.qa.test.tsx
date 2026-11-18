@@ -228,6 +228,37 @@ describe('QA · staff workspace', () => {
   })
 })
 
+describe('QA · audit log (B10, #56)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(at('15:00'))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const navLabels = () => within(screen.getByRole('navigation', { name: 'Staff' })).getAllByRole('link').map((a) => a.textContent)
+
+  it('admin nav links to the audit log', async () => {
+    mockStaffApi({ role: 'admin' })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    expect(navLabels()).toEqual(expect.arrayContaining(['Audit log']))
+    expect(screen.getByRole('link', { name: 'Audit log' })).toHaveAttribute('href', '/staff/audit')
+  })
+
+  it.each(['doctor', 'nurse', 'bloodBank', 'pharmacist'] as const)('%s nav has no audit log', async (role) => {
+    mockStaffApi({ role })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    expect(navLabels()).not.toContain('Audit log')
+  })
+
+  it('admin can open the audit log', async () => {
+    mockStaffApi({ role: 'admin' })
+    renderStaff('/staff/audit')
+    expect(await screen.findByRole('table', { name: 'Audit entries' })).toBeInTheDocument()
+  })
+})
+
 describe('QA · app shell', () => {
   it('unknown route shows not found with link home', () => {
     render(
