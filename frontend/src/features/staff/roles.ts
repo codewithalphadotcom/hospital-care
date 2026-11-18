@@ -11,6 +11,7 @@ export type Module =
   | 'orBookings'
   | 'hospitals'
   | 'users'
+  | 'commandCentre'
 
 export const ROLES: readonly { id: Role; label: string }[] = [
   { id: 'admin', label: 'Admin' },
@@ -22,6 +23,7 @@ export const ROLES: readonly { id: Role; label: string }[] = [
 
 export const MODULES: readonly { id: Module; label: string; path: string }[] = [
   { id: 'overview', label: 'Overview', path: '/staff' },
+  { id: 'commandCentre', label: 'City command centre', path: '/staff/command-centre' },
   { id: 'emergencies', label: 'Emergencies', path: '/staff/emergencies' },
   { id: 'transfers', label: 'Transfers', path: '/staff/transfers' },
   { id: 'beds', label: 'Beds', path: '/staff/beds' },
@@ -48,6 +50,7 @@ type Access = 'view' | 'edit'
 const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
   admin: {
     overview: 'view',
+    commandCentre: 'view', // the whole network, read-only (story #55)
     emergencies: 'edit',
     transfers: 'edit',
     beds: 'edit',
