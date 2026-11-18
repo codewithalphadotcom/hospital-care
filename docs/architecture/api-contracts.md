@@ -12,20 +12,22 @@ unknown id, **400** `{field: ["message"]}` for invalid input.
 `ACCESS` in `backend/apps/accounts/permissions.py` and `frontend/src/features/staff/roles.ts` must stay
 identical. Reads need *view*, writes need *edit*.
 
-| Role | overview | emergencies | beds | blood | pharmacy | hospitals | users | equipment | operatingRooms | orBookings | transfers |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| admin | view | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit |
-| doctor | view | edit | view | view | view | view | – | view | view | edit | edit |
-| nurse | view | edit | edit | – | view | view | – | edit | edit | edit | edit |
-| bloodBank | view | view | – | edit | – | view | – | – | – | – | edit |
-| pharmacist | view | view | – | – | edit | view | – | – | – | – | – |
-| patient | – | – | – | – | – | – | – | – | – | – | – |
+| Role | overview | emergencies | beds | blood | pharmacy | hospitals | users | equipment | operatingRooms | orBookings | transfers | audit |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| admin | view | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | view |
+| doctor | view | edit | view | view | view | view | – | view | view | edit | edit | – |
+| nurse | view | edit | edit | – | view | view | – | edit | edit | edit | edit | – |
+| bloodBank | view | view | – | edit | – | view | – | – | – | – | edit | – |
+| pharmacist | view | view | – | – | edit | view | – | – | – | – | – | – |
+| patient | – | – | – | – | – | – | – | – | – | – | – | – |
 
 `emergencies` was added in Sprint 7 with #30 (see [api.md](api.md#emergency-cases-30-32)). `transfers` was added with
 B01 (#47): it lets a role use the transfer endpoints at all. Who may ask, approve, ship or receive is narrowed per move
 (see [transfers](api.md#transfers-47-48-49)).
 
 `orBookings` (story #29) is the module for booking and cancelling operating room slots. It has no nav item of its own: the day schedule is part of operating rooms.
+
+`audit` (#56) is the audit trail: admins only, and read only (`view`). Its endpoints are in [api.md](api.md#audit-trail-56).
 
 **Own hospital only:** a user who isn't an admin may change a resource only if it belongs to their own
 hospital (`resource.hospital == user.hospital`); otherwise **403**. Admins manage the whole network.
@@ -126,6 +128,6 @@ There's no new endpoint. `POST /beds/<id>/actions/` now runs through the shared 
 
 ## Audit (story 8.1)
 
-There's no endpoint in Sprint 2. Entries are append-only (the model refuses update and delete), so the API can
-neither edit nor delete them. Admins read them in Django admin (`/admin/audit/auditlog/`, read-only). Search and
-export come with issue #56 in Sprint 8.
+Entries are append-only (the model refuses update and delete), so the API can neither edit nor delete them. Admins
+search and export them with `GET /api/audit/entries/` and `GET /api/audit/entries/export/` (issue #56, see
+[api.md](api.md#audit-trail-56)). Django admin stays read-only as well (`/admin/audit/auditlog/`).
