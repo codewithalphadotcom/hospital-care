@@ -750,6 +750,49 @@ screen. The next one tries again.
 
 Each reload runs the escalation sweep of `GET /emergencies/` again, as the first load does. That is fine at MVP scale.
 
+## City command centre (#55)
+
+Module `commandCentre`: admin only, view. Every other role, and a signed-out caller, gets **403**. The page lives at
+`/staff/command-centre`. Shapes are in `frontend/src/api/commandCentre.ts`.
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/command-centre/` | – | 200 `CommandCentre` |
+
+```ts
+CommandCentre = {
+  updatedAt: string,                     // when the figures were taken; the page shows it
+  nearExpiryDays: number,                // the window "near expiry" means, from BLOOD_NEAR_EXPIRY_DAYS (3)
+  totals: Figures,                       // sums of the hospital rows; redCells carry no level
+  hospitals: (Figures & { id: number, name: string })[]   // active hospitals only
+}
+Figures = {
+  redCells: { group, available, minimum, level: 'ok' | 'low' | 'critical' }[],  // 8 groups; totals: { group, available }
+  components: { redCells | plasma | platelets | cryo: { usable, nearExpiry } },
+  beds: { icu, emergency, general, isolation, nicu },        // free beds
+  equipment: { ventilator, monitor, defibrillator, dialysis }, // available
+  operatingRooms: number,                                     // available
+  cases: { active, escalated },
+  open: { blood, bed, equipment, operatingRoom }              // quantity − fulfilled − held, over active cases
+}
+```
+
+- **Who is counted.** Active hospitals only (`is_active`), as matching counts them. Usable stock is `available` and not past
+  expiry, so reserved, quarantined, issued and expired units don't count. Free beds are `free`; equipment and rooms are
+  `available`, so held or busy ones don't. Active cases are `open`, `matching`, `partiallyFulfilled` and `escalated`.
+- **Levels.** Red cells only, judged per hospital against the minimum in `RED_CELL_MINIMUM` (a copy of `MINIMUM_STOCK.redCells`
+  in `blood.ts`; a test keeps them equal). `critical` below half the minimum, `low` below it, otherwise `ok`. The totals never
+  carry a level.
+- **Order.** Hospitals with a critical red-cell group come first, then the rest by name.
+- **Sweeps first.** The read runs `escalate_overdue()` and `release_expired()`, as the feed and the case pages do, so held
+  stock and escalated cases match those pages.
+- **Read only.** A write is refused (403), even for an admin.
+- **Contents.** Counts, hospital names and ids. No patient field, case reference, unit or asset identifier, and no staff name.
+- **Cost.** A fixed number of queries whatever the number of hospitals: seven grouped reads for the figures, plus the two
+  sweeps (10 in all on the seeded network, budget 15). A test adds two hospitals and checks the count doesn't change.
+- **Refresh.** The server holds nothing; the page reads again every 60 seconds while the tab is visible. Each read runs
+  the sweeps, which is why the period is a minute.
+
 ## Demo data
 
 ```bash

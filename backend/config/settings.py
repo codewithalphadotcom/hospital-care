@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "apps.emergencies",
     "apps.matching",
     "apps.transfers",
+    "apps.command_centre",
     "apps.pharmacy",
     "apps.equipment",
     "apps.operating_rooms",

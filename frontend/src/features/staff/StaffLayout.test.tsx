@@ -67,6 +67,7 @@ describe('StaffLayout', () => {
     expect(await screen.findByText('beds content')).toBeInTheDocument()
     expect(navLinks()).toEqual([
       'Overview',
+      'City command centre',
       'Emergencies',
       'Transfers',
       'Beds',
