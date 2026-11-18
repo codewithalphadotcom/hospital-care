@@ -309,6 +309,32 @@ describe('QA · audit log (B10, #56)', () => {
   })
 })
 
+describe('QA · alerts (B07, #53)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(at('15:00'))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const navLabels = () => within(screen.getByRole('navigation', { name: 'Staff' })).getAllByRole('link').map((a) => a.textContent)
+
+  it.each(['admin', 'doctor', 'nurse', 'bloodBank', 'pharmacist'] as const)('%s nav links to the alerts page', async (role) => {
+    mockStaffApi({ role })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    expect(navLabels()).toEqual(expect.arrayContaining(['Alerts']))
+    expect(screen.getByRole('link', { name: 'Alerts' })).toHaveAttribute('href', '/staff/alerts')
+    expect(navLabels()[1]).toBe('Alerts')
+  })
+
+  it.each(['admin', 'doctor', 'nurse', 'bloodBank', 'pharmacist'] as const)('%s can open the alerts page', async (role) => {
+    mockStaffApi({ role, notifications: [] })
+    renderStaff('/staff/alerts')
+    expect(await screen.findByRole('region', { name: 'Your alerts' })).toBeInTheDocument()
+    expect(await screen.findByText('No notifications yet.')).toBeInTheDocument()
+  })
+})
+
 describe('QA · app shell', () => {
   it('unknown route shows not found with link home', () => {
     render(
