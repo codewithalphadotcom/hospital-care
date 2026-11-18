@@ -31,6 +31,9 @@ This is for staff at both hospitals: the supplier who sends the stock, and the r
       delivered.
 - [ ] The requester can **cancel** a transfer up to and including in transit; its holds are released, so the units count
       as the supplier's stock again. Delivered, rejected and cancelled are final.
+- [ ] Closing or cancelling a case cancels its unfinished transfers (requested, approved, dispatched, in transit) in
+      the same transaction and releases their holds. Pinned holds never expire, so without this a finished case
+      would keep the supplier's stock locked.
 - [ ] The **Transfers** page (`/staff/transfers`) lists the transfers of the user's hospital, with **Incoming** (asked of
       us) and **Outgoing** (we asked) tabs and a status filter. Admins see the whole network. Each transfer shows the
       case, the need, the other hospital, the quantity (and how many were approved), the status, and its history, with
