@@ -27,6 +27,9 @@ B01 (#47): it lets a role use the transfer endpoints at all. Who may ask, approv
 
 `orBookings` (story #29) is the module for booking and cancelling operating room slots. It has no nav item of its own: the day schedule is part of operating rooms.
 
+Notifications (#52) are not a module and have no row here. Any signed-in staff member may read their own (`IsStaff` in
+`apps/accounts/permissions.py`); patients and signed-out users get 403 (see [api.md](api.md#notifications-52)).
+
 **Own hospital only:** a user who isn't an admin may change a resource only if it belongs to their own
 hospital (`resource.hospital == user.hospital`); otherwise **403**. Admins manage the whole network.
 The bed board (`GET /beds/`) and blood list (`GET /blood/units/`) only return the user's hospital when they
