@@ -67,6 +67,7 @@ describe('StaffLayout', () => {
     expect(await screen.findByText('beds content')).toBeInTheDocument()
     expect(navLinks()).toEqual([
       'Overview',
+      'Alerts',
       'City command centre',
       'Emergencies',
       'Transfers',
@@ -88,7 +89,7 @@ describe('StaffLayout', () => {
     const { fetchMock } = mockStaffApi({ role: 'pharmacist' })
     renderAt('/staff')
     expect(await screen.findByText('overview content')).toBeInTheDocument()
-    expect(navLinks()).toEqual(['Overview', 'Emergencies', 'Pharmacy', 'Hospitals'])
+    expect(navLinks()).toEqual(['Overview', 'Alerts', 'Emergencies', 'Pharmacy', 'Hospitals'])
     // Module data loads after the layout appears, so wait for it rather than racing it.
     await waitFor(() => expect(requested(fetchMock)).toContain('/api/pharmacy/stock/'))
     expect(requested(fetchMock)).not.toContain('/api/beds/')
@@ -170,7 +171,8 @@ describe('StaffLayout', () => {
     mockStaffApi({ role: 'admin' })
     renderAt('/staff')
     expect(await screen.findByText(/Evening shift/)).toHaveTextContent('Evening shift · 14:00–20:00 · 5 h left')
-    const bell = await screen.findByRole('link', { name: /items? need attention/ })
-    expect(bell).toHaveAttribute('href', '/staff#attention')
+    // The bell is a button that opens the notification panel (B07); its name says the counts in words.
+    const bell = await screen.findByRole('button', { name: /0 unread notifications and \d+ items? need attention/ })
+    expect(bell).toHaveAttribute('aria-expanded', 'false')
   })
 })
