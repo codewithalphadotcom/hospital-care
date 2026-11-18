@@ -10,6 +10,7 @@ import {
   type AmbulanceType,
 } from '../../api/ambulances'
 import { ApiError } from '../../api/client'
+import { TRIP_STATUS_LABEL } from '../../api/trips'
 import { FormAlert } from '../../components/form/FormAlert'
 import { FilterBar } from '../../components/ui/FilterBar'
 import { Panel } from '../../components/ui/Panel'
@@ -28,6 +29,7 @@ type StatusFilter = 'all' | AmbulanceStatus
 
 const TONE: Record<AmbulanceStatus, Tone> = {
   available: 'ok',
+  dispatched: 'neutral',
   maintenance: 'warning',
   outOfService: 'critical',
 }
@@ -113,6 +115,11 @@ export default function AmbulancesPage() {
                     <td>{a.hospital ?? '—'}</td>
                     <td>
                       <StatusBadge tone={TONE[a.status]}>{statusLabel(a.status)}</StatusBadge>
+                      {a.trip && (
+                        <p className={pageStyles.hint}>
+                          Carrying transfer #{a.trip.transferId}, {TRIP_STATUS_LABEL[a.trip.status].toLowerCase()}
+                        </p>
+                      )}
                     </td>
                     {editable && (
                       <td>

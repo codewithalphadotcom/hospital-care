@@ -13,6 +13,8 @@ const TRANSITIONS: Record<AmbulanceStatus, readonly Transition[]> = {
     { action: 'outOfService', label: 'Take out of service', next: 'outOfService' },
   ],
   outOfService: [{ action: 'returnToService', label: 'Return to service', next: 'maintenance' }],
+  // A trip moves a dispatched vehicle back to available (story #51); the registry offers no move from here.
+  dispatched: [],
 }
 
 export function actionsFor(status: AmbulanceStatus): readonly Transition[] {
