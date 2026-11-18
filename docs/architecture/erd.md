@@ -233,10 +233,10 @@ erDiagram
     }
     Ambulance {
         bigint id PK
-        string code UK
-        string type
-        bigint base_hospital_id FK
-        string status "Resource"
+        string identifier "unique per hospital, any case"
+        string type "basic|advanced|patientTransport"
+        bigint hospital_id FK "base hospital"
+        string status "available|maintenance|outOfService"
     }
     Trip {
         bigint id PK

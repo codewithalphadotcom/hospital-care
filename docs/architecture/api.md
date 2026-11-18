@@ -707,6 +707,39 @@ Transfer = {
   Each reservation gains `transfer`, as above.
 - **Admin:** read-only. Transfers are asked, answered and received in the app, so every move is checked and recorded.
 
+## Ambulances (B04, #50)
+
+The ambulance registry: each ambulance at its base hospital, with its type and status. Access: admin and nurse **edit**,
+doctor **view**; other roles 403. Staff see their own hospital's ambulances; admins see all. Every registration and move is
+audit-logged. Dispatch and trips come with [B05](../aidlc/bolts/B05-ambulance-dispatch.md).
+
+| Method | Path | Body | Success |
+|---|---|---|---|
+| GET | `/ambulances/?type=&status=&q=` | – | `Ambulance[]`, by type then asset tag (`q` searches the asset tag) |
+| POST | `/ambulances/` | `{identifier, type, hospitalId?}` | 201 `Ambulance` |
+| POST | `/ambulances/<id>/actions/` | `{action, reason?}` | 200 `Ambulance` |
+
+```ts
+Ambulance = {
+  id: number, identifier: string,   // asset tag, stored upper-case, unique within a hospital (400 otherwise)
+  type: 'basic' | 'advanced' | 'patientTransport',
+  status: 'available' | 'maintenance' | 'outOfService',  // a new ambulance starts available
+  statusSince: string,
+  hospital: string | null           // the base hospital's name
+}
+```
+
+- **Registering.** A non-admin registers at their own hospital; a `hospitalId` they send is ignored. An admin sends
+  `hospitalId`, or uses their own hospital. With neither: 400 `{"hospitalId": [...]}`. A tag already used at that hospital
+  (any case): 400 `{"identifier": [...]}`. A 400 saves nothing. `status` can't be set on registration.
+- **Moves** (the lifecycle is in `apps/ambulances/models.py`): `startMaintenance` (available → maintenance),
+  `finishMaintenance` (maintenance → available), `outOfService` (available or maintenance → out of service) and
+  `returnToService` (out of service → maintenance). A move the status doesn't allow is **409** `{"detail": "Can't
+  outOfService a vehicle that is out of service."}` and changes nothing. Unknown action → 400.
+- Another hospital's ambulance is **404** for a non-admin. A role without access gets **403**, signed out too.
+- **Audit:** `ambulance.registered` (identifier, type, status) and `ambulance.status_changed` (status before and after,
+  with the optional `reason`).
+
 ## Demo data
 
 ```bash
@@ -716,7 +749,7 @@ docker compose exec backend python manage.py seed_demo --reset  # start the demo
 
 Creates 3 hospitals (CityCare General, Seaview, Northside Children's) with 10 departments, 12 wards / 164 beds
 (ICU, emergency, general, isolation and NICU) and 10 storage locations, plus 320 blood units (with screening results), 60 synthetic donors (two deferred) and 6 upcoming donation
-appointments, 23 medicines, 14 doctor shifts, three operating rooms per hospital with a few bookings today and
+appointments, 23 medicines, 14 doctor shifts, seven ambulances (two per hospital and a patient transport at CityCare General), three operating rooms per hospital with a few bookings today and
 tomorrow, the ER status, and one login per
 role (`admin@`, `doctor@`, `nurse@`, `bloodbank@`, `pharmacist@`, `patient@demo.citycare.pk`, password
 `CityCare-demo-1`). Demo only: never run it against real data.

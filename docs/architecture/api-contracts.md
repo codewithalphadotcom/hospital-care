@@ -12,18 +12,20 @@ unknown id, **400** `{field: ["message"]}` for invalid input.
 `ACCESS` in `backend/apps/accounts/permissions.py` and `frontend/src/features/staff/roles.ts` must stay
 identical. Reads need *view*, writes need *edit*.
 
-| Role | overview | emergencies | beds | blood | pharmacy | hospitals | users | equipment | operatingRooms | orBookings | transfers |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| admin | view | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit |
-| doctor | view | edit | view | view | view | view | – | view | view | edit | edit |
-| nurse | view | edit | edit | – | view | view | – | edit | edit | edit | edit |
-| bloodBank | view | view | – | edit | – | view | – | – | – | – | edit |
-| pharmacist | view | view | – | – | edit | view | – | – | – | – | – |
-| patient | – | – | – | – | – | – | – | – | – | – | – |
+| Role | overview | emergencies | beds | blood | pharmacy | hospitals | users | equipment | operatingRooms | orBookings | transfers | ambulances |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| admin | view | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit |
+| doctor | view | edit | view | view | view | view | – | view | view | edit | edit | view |
+| nurse | view | edit | edit | – | view | view | – | edit | edit | edit | edit | edit |
+| bloodBank | view | view | – | edit | – | view | – | – | – | – | edit | – |
+| pharmacist | view | view | – | – | edit | view | – | – | – | – | – | – |
+| patient | – | – | – | – | – | – | – | – | – | – | – | – |
 
 `emergencies` was added in Sprint 7 with #30 (see [api.md](api.md#emergency-cases-30-32)). `transfers` was added with
 B01 (#47): it lets a role use the transfer endpoints at all. Who may ask, approve, ship or receive is narrowed per move
 (see [transfers](api.md#transfers-47-48-49)).
+
+`ambulances` (B04, #50) is the ambulance registry: admin and nurse edit, doctor views. Blood bank and pharmacist have no access (see [ambulances](api.md#ambulances-b04-50)).
 
 `orBookings` (story #29) is the module for booking and cancelling operating room slots. It has no nav item of its own: the day schedule is part of operating rooms.
 
