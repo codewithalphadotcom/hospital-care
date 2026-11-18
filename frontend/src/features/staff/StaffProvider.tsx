@@ -8,6 +8,7 @@ import { getCases } from '../../api/emergencies'
 import { getMedicines } from '../../api/pharmacy'
 import { getPublicStatus } from '../../api/publicStatus'
 import { listTransfers } from '../../api/transfers'
+import { useNotificationFeed } from '../notifications/useNotificationFeed'
 import { useNow } from '../../lib/useNow'
 import { buildAttention } from './attention'
 import { canSee, type Role } from './roles'
@@ -116,6 +117,7 @@ function StaffSession({ user, children }: { user: User; children: ReactNode }) {
   const [load, setLoad] = useState<Load>({ data: null, failed: false, updatedAt: null, refreshFailed: false })
   const { data, failed, updatedAt, refreshFailed } = load
   const reloading = useRef(false)
+  const notifications = useNotificationFeed()
 
   const reload = useCallback(async () => {
     if (reloading.current) return
@@ -207,8 +209,8 @@ function StaffSession({ user, children }: { user: User; children: ReactNode }) {
   )
 
   const value = useMemo<StaffState>(
-    () => ({ user, role, now, data, failed, updatedAt, refreshFailed, attention, updateBed, upsertUnit, refreshUnits, signOut }),
-    [user, role, now, data, failed, updatedAt, refreshFailed, attention, updateBed, upsertUnit, refreshUnits, signOut],
+    () => ({ user, role, now, data, failed, updatedAt, refreshFailed, attention, notifications, updateBed, upsertUnit, refreshUnits, signOut }),
+    [user, role, now, data, failed, updatedAt, refreshFailed, attention, notifications, updateBed, upsertUnit, refreshUnits, signOut],
   )
 
   return <StaffContext.Provider value={value}>{children}</StaffContext.Provider>
