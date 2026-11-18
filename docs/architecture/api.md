@@ -740,6 +740,16 @@ Ambulance = {
 - **Audit:** `ambulance.registered` (identifier, type, status) and `ambulance.status_changed` (status before and after,
   with the optional `reason`).
 
+## Dashboard refresh (#54, B08)
+
+No new endpoint. The staff workspace reloads the data its pages share every 30 seconds, with the same GET calls as its first
+load for the user's role: beds, blood units, pharmacy stock, `GET /emergencies/`, `GET /transfers/?direction=incoming` and
+`?direction=outgoing` (the transfers module only), and the public ER status. The reload is skipped while the tab is hidden
+and while another reload is running, and runs once when the tab is shown again. A reload that fails keeps the data on
+screen. The next one tries again.
+
+Each reload runs the escalation sweep of `GET /emergencies/` again, as the first load does. That is fine at MVP scale.
+
 ## Demo data
 
 ```bash
