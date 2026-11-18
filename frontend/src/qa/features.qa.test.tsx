@@ -208,6 +208,29 @@ describe('QA · staff workspace', () => {
     expect(labels).toEqual(expect.arrayContaining(['Hospitals', 'Users and roles']))
   })
 
+  it('admin sees the city command centre in nav; nurse does not', async () => {
+    mockStaffApi({ role: 'admin' })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    expect(screen.getByRole('link', { name: 'City command centre' })).toHaveAttribute('href', '/staff/command-centre')
+  })
+
+  it('nurse nav hides the city command centre', async () => {
+    mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    const labels = within(screen.getByRole('navigation', { name: 'Staff' }))
+      .getAllByRole('link')
+      .map((a) => a.textContent)
+    expect(labels).not.toContain('City command centre')
+  })
+
+  it('nurse cannot open the city command centre by URL', async () => {
+    mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/command-centre')
+    expect(await screen.findByRole('heading', { name: 'You don’t have access to this page' })).toBeInTheDocument()
+  })
+
   it('sign out returns to sign in', async () => {
     mockStaffApi({ role: 'nurse' })
     renderStaff('/staff')

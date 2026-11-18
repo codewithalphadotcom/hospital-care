@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import type { User } from '../api/auth'
+import type { CommandCentre } from '../api/commandCentre'
 import type { BedAction, BedBoard } from '../api/beds'
 import type {
   CandidatesResponse,
@@ -39,6 +40,7 @@ import { canEdit, canSee, type Module, type Role } from '../features/staff/roles
 import { dateKey } from '../lib/time'
 import { sampleBedBoard } from './fixtures/beds'
 import { sampleBloodUnits } from './fixtures/blood'
+import { sampleCommandCentre } from './fixtures/commandCentre'
 import { sampleCandidates, sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
 import { sampleMedicines } from './fixtures/pharmacy'
@@ -182,6 +184,8 @@ type StaffApiOptions = {
   held?: { reference: string; itemId: number; count: number }[]
   /** Start with these transfers (stories #47 to #49). Approved, dispatched and in-transit ones set their units aside. */
   transfers?: Transfer[]
+  /** Use these command centre figures (story #55) instead of the sample network. */
+  commandCentre?: CommandCentre
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -264,6 +268,7 @@ export function mockStaffApi({
   stock: customStock,
   held: seedHolds = [],
   transfers: seedTransfers = [],
+  commandCentre: customCommandCentre,
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -841,6 +846,7 @@ export function mockStaffApi({
       return ok(transferView(t))
     }),
     'GET /users/': view('users', () => ok(users)),
+    'GET /command-centre/': view('commandCentre', () => ok(customCommandCentre ?? sampleCommandCentre(now))),
     'PATCH /users/:id/': edit('users', ({ params, body }) => {
       const user = users.find((u) => u.id === Number(params.id))
       if (!user) return fail(404)
