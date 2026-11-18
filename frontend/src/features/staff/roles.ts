@@ -1,6 +1,7 @@
 export type Role = 'admin' | 'doctor' | 'nurse' | 'bloodBank' | 'pharmacist'
 export type Module =
   | 'overview'
+  | 'alerts'
   | 'emergencies'
   | 'transfers'
   | 'beds'
@@ -25,6 +26,7 @@ export const ROLES: readonly { id: Role; label: string }[] = [
 
 export const MODULES: readonly { id: Module; label: string; path: string }[] = [
   { id: 'overview', label: 'Overview', path: '/staff' },
+  { id: 'alerts', label: 'Alerts', path: '/staff/alerts' },
   { id: 'commandCentre', label: 'City command centre', path: '/staff/command-centre' },
   { id: 'emergencies', label: 'Emergencies', path: '/staff/emergencies' },
   { id: 'transfers', label: 'Transfers', path: '/staff/transfers' },
@@ -54,6 +56,7 @@ type Access = 'view' | 'edit'
 const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
   admin: {
     overview: 'view',
+    alerts: 'view', // the user's own notifications; nobody edits them here
     commandCentre: 'view', // the whole network, read-only (story #55)
     emergencies: 'edit',
     transfers: 'edit',
@@ -70,6 +73,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
   },
   doctor: {
     overview: 'view',
+    alerts: 'view',
     emergencies: 'edit',
     transfers: 'edit',
     beds: 'view',
@@ -83,6 +87,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
   },
   nurse: {
     overview: 'view',
+    alerts: 'view',
     emergencies: 'edit',
     transfers: 'edit',
     beds: 'edit',
@@ -93,8 +98,8 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     ambulances: 'edit',
     hospitals: 'view',
   },
-  bloodBank: { overview: 'view', emergencies: 'view', transfers: 'edit', blood: 'edit', hospitals: 'view' },
-  pharmacist: { overview: 'view', emergencies: 'view', pharmacy: 'edit', hospitals: 'view' },
+  bloodBank: { overview: 'view', alerts: 'view', emergencies: 'view', transfers: 'edit', blood: 'edit', hospitals: 'view' },
+  pharmacist: { overview: 'view', alerts: 'view', emergencies: 'view', pharmacy: 'edit', hospitals: 'view' },
 }
 
 export function canSee(role: Role, module: Module): boolean {
