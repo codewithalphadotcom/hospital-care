@@ -5,6 +5,7 @@ import LandingPage from './pages/LandingPage'
 import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
 import SignupPage from './pages/SignupPage'
+import AlertsPage from './pages/staff/AlertsPage'
 import BedsPage from './pages/staff/BedsPage'
 import AuditPage from './pages/staff/AuditPage'
 import BloodPage from './pages/staff/BloodPage'
@@ -33,6 +34,7 @@ export function AppRoutes() {
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/staff" element={<StaffLayout />}>
         <Route index element={<OverviewPage />} />
+        <Route path="alerts" element={<AlertsPage />} />
         <Route path="command-centre" element={<CommandCentrePage />} />
         <Route path="emergencies" element={<EmergenciesPage />} />
         <Route path="emergencies/feed" element={<EmergencyFeedPage />} />
