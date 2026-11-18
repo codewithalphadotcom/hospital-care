@@ -24,6 +24,7 @@ ACCESS: dict[str, dict[str, str]] = {
         "transfers": EDIT,
         "ambulances": EDIT,
         "commandCentre": VIEW,  # the whole network's figures, read-only (story #55)
+        "audit": VIEW,
     },
     Role.DOCTOR: {
         "overview": VIEW,

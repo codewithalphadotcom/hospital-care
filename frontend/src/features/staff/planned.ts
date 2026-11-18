@@ -6,5 +6,4 @@ export const PLANNED: readonly { path: string; label: string; sprint: number; is
   // The donor API shipped in Sprint 3 (#20–#22); its page is bolt B11 (docs/aidlc/bolts/).
   { path: '/staff/donors', label: 'Donors', sprint: 8, issues: '#20–#22' },
   { path: '/staff/alerts', label: 'Alerts', sprint: 8, issues: '#52–#53' },
-  { path: '/staff/audit', label: 'Audit log', sprint: 8, issues: '#56' },
 ]

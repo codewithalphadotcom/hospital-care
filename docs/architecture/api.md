@@ -793,6 +793,37 @@ Figures = {
 - **Refresh.** The server holds nothing; the page reads again every 60 seconds while the tab is visible. Each read runs
   the sweeps, which is why the period is a minute.
 
+## Audit trail (#56)
+
+Admins search the audit trail and export it to CSV. Both endpoints are read only: POST, PUT, PATCH and DELETE answer
+**405**. Anyone else, and a signed-out user, gets **403** (`audit: view`, admins only; superusers act as admins). The rules
+are in `apps/audit/services.py`.
+
+| Method | Path | Returns | Access |
+|---|---|---|---|
+| GET | `/api/audit/entries/` | `{count, limit, offset, results}` | audit: view |
+| GET | `/api/audit/entries/export/` | CSV attachment, `audit-<date>.csv` | audit: view |
+
+- **Filters** are optional and combine with AND. `actor` is the account's email, exact and ignoring case; it still matches
+  after the account is deleted. `action` is a starts-with match (`bed.` finds every bed action). `targetType` and `targetId`
+  are exact (use both for one object's history). `from` and `to` are `YYYY-MM-DD`, each a whole day in `Asia/Karachi`, and
+  both ends are included. `q` is a case-insensitive contains match over `actorEmail`, `action`, `targetRepr`, `targetId` and
+  `reason`, not over `before` or `after`.
+- **400** `{"detail": "..."}` for a date that doesn't parse, a `to` before `from`, or a `limit` or `offset` that isn't a whole
+  number (negative values included).
+- **Paging** on the search: `limit` defaults to 50 and is cut to 200; `offset` defaults to 0. Results are newest first (`at`
+  descending, then `id` descending).
+- **Result rows:** `{id, at, actorEmail, action, targetType, targetId, targetRepr, reason, before, after}`. `at` is ISO 8601 in
+  UTC. `before` and `after` are the recorded JSON values, or `null`.
+- **Export:** the same filters, in the same column order as the rows above, with `at` in UTC. `before` and `after` are JSON
+  text in one cell each, empty when there is no value. A cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return
+  gets a leading `'`. The file holds at most **10,000** rows: over that, the answer is **400** `{"detail": "..."}` and no file.
+  Rows are read in chunks, not loaded all at once.
+- **Audit:** each completed export writes `audit.exported` (target: the exporting admin's account; `after` holds the filters
+  and the row count). An export that is refused, or never read to the end, writes nothing. Searches and page views aren't
+  logged.
+- **Queries:** a page costs two queries (one count, one select), however many rows it holds.
+
 ## Demo data
 
 ```bash

@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage'
 import NotFoundPage from './pages/NotFoundPage'
 import SignupPage from './pages/SignupPage'
 import BedsPage from './pages/staff/BedsPage'
+import AuditPage from './pages/staff/AuditPage'
 import BloodPage from './pages/staff/BloodPage'
 import CommandCentrePage from './pages/staff/CommandCentrePage'
 import EmergenciesPage from './pages/staff/EmergenciesPage'
@@ -49,6 +50,7 @@ export function AppRoutes() {
         <Route path="hospitals/:id" element={<HospitalDetailPage />} />
         <Route path="hospitals/:id/edit" element={<HospitalFormPage />} />
         <Route path="users" element={<UsersPage />} />
+        <Route path="audit" element={<AuditPage />} />
         {PLANNED.map((p) => (
           <Route key={p.path} path={p.path.replace('/staff/', '')} element={<PlannedPage />} />
         ))}

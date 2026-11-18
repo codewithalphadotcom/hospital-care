@@ -13,6 +13,7 @@ export type Module =
   | 'hospitals'
   | 'users'
   | 'commandCentre'
+  | 'audit'
 
 export const ROLES: readonly { id: Role; label: string }[] = [
   { id: 'admin', label: 'Admin' },
@@ -35,6 +36,7 @@ export const MODULES: readonly { id: Module; label: string; path: string }[] = [
   { id: 'ambulances', label: 'Ambulances', path: '/staff/ambulances' },
   { id: 'hospitals', label: 'Hospitals', path: '/staff/hospitals' },
   { id: 'users', label: 'Users and roles', path: '/staff/users' },
+  { id: 'audit', label: 'Audit log', path: '/staff/audit' },
 ]
 
 /** The module a staff path belongs to, e.g. /staff/hospitals/3/edit → hospitals. Anything else → overview. */
@@ -64,6 +66,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     ambulances: 'edit',
     hospitals: 'edit',
     users: 'edit',
+    audit: 'view',
   },
   doctor: {
     overview: 'view',

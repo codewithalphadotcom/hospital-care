@@ -19,6 +19,7 @@ import type {
   StatusChange,
 } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
+import { AUDIT_EXPORT_LIMIT, type AuditEntry } from '../api/audit'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
 import type { Ambulance, AmbulanceAction, AmbulanceInput, AmbulanceType } from '../api/ambulances'
 import type {
@@ -41,6 +42,7 @@ import { applyOperatingRoomAction } from '../features/operatingRooms/operatingRo
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { dateKey } from '../lib/time'
 import { sampleBedBoard } from './fixtures/beds'
+import { auditCsv, filterAudit, karachiDay, sampleAuditEntries } from './fixtures/audit'
 import { sampleBloodUnits } from './fixtures/blood'
 import { sampleCommandCentre } from './fixtures/commandCentre'
 import { sampleCandidates, sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
@@ -48,7 +50,8 @@ import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hos
 import { sampleMedicines } from './fixtures/pharmacy'
 import { samplePublicStatus } from './fixtures/publicStatus'
 
-export type Reply = { status?: number; body?: unknown }
+/** A reply is JSON (`body`), or a file (`file`): its text, sent with the type and the name the server gives it. */
+export type Reply = { status?: number; body?: unknown; file?: { name: string; type: string; text: string } }
 type Request = { params: Record<string, string>; body: unknown; query: URLSearchParams }
 type Route = Reply | ((request: Request) => Reply)
 
@@ -84,6 +87,10 @@ export function mockApi(routes: Record<string, Route>) {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       const reply = typeof route === 'function' ? route({ params, body, query: url.searchParams }) : route
       const status = reply.status ?? 200
+      if (reply.file) {
+        const headers = { 'Content-Type': reply.file.type, 'Content-Disposition': `attachment; filename="${reply.file.name}"` }
+        return new Response(reply.file.text, { status, headers })
+      }
       return new Response(status === 204 ? null : JSON.stringify(reply.body ?? {}), { status })
     }
     return new Response(JSON.stringify({ detail: 'Not found' }), { status: 404 })
@@ -188,6 +195,8 @@ type StaffApiOptions = {
   transfers?: Transfer[]
   /** Use these command centre figures (story #55) instead of the sample network. */
   commandCentre?: CommandCentre
+  /** Use this audit trail instead of the sample one (B10, #56). */
+  audit?: AuditEntry[]
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -288,6 +297,7 @@ export function mockStaffApi({
   held: seedHolds = [],
   transfers: seedTransfers = [],
   commandCentre: customCommandCentre,
+  audit: customAudit,
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -534,6 +544,7 @@ export function mockStaffApi({
 
   const equipment = sampleEquipment(now)
   const ambulances = sampleAmbulances(now)
+  const auditEntries = customAudit ?? sampleAuditEntries(now)
   const rooms = sampleOperatingRooms(now)
   const bookings = sampleOrBookings(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
@@ -879,6 +890,23 @@ export function mockStaffApi({
     'GET /hospitals/capabilities/': view('hospitals', () => ok(sampleCapabilities)),
     'GET /hospitals/': view('hospitals', () => ok(hospitals)),
     'GET /equipment/': view('equipment', () => ok(equipment)),
+    // The audit trail (B10, #56): admins only. The export is capped and sent as a file, not JSON.
+    'GET /audit/entries/': view('audit', ({ query }) => {
+      const found = filterAudit(auditEntries, query)
+      if ('detail' in found) return fail(400, found)
+      const limit = Math.min(Number(query.get('limit') ?? 50), 200)
+      const offset = Number(query.get('offset') ?? 0)
+      return ok({ count: found.entries.length, limit, offset, results: found.entries.slice(offset, offset + limit) })
+    }),
+    'GET /audit/entries/export/': view('audit', ({ query }) => {
+      const found = filterAudit(auditEntries, query)
+      if ('detail' in found) return fail(400, found)
+      if (found.entries.length > AUDIT_EXPORT_LIMIT) {
+        return fail(400, { detail: `More than ${AUDIT_EXPORT_LIMIT.toLocaleString('en-US')} entries match, so the file would be incomplete. Narrow the filters, for example a shorter date range, and export again.` })
+      }
+      const name = `audit-${karachiDay(now.toISOString())}.csv`
+      return { file: { name, type: 'text/csv; charset=utf-8', text: auditCsv(found.entries) } }
+    }),
     'POST /equipment/': edit('equipment', ({ body }) => {
       const input = body as EquipmentInput
       const tag = input.identifier.toUpperCase()
