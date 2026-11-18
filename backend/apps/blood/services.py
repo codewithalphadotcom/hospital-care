@@ -217,6 +217,8 @@ def screen_donor(donor: Donor, *, eligible: bool, reason: str, deferred_until, a
 
 
 def book_appointment(donor: Donor, starts_at: datetime, *, actor) -> DonationAppointment:
+    if not may_change(actor, donor):
+        raise PermissionDenied("You can only book donors registered at your own hospital.")
     slot = settings.BLOOD_APPOINTMENT_SLOT_MINUTES
     local = timezone.localtime(starts_at)
     if local.second or local.microsecond or (local.hour * 60 + local.minute) % slot:
