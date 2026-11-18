@@ -72,6 +72,7 @@ describe('StaffLayout', () => {
       'Transfers',
       'Beds',
       'Blood bank',
+      'Donors',
       'Pharmacy',
       'Equipment',
       'Operating rooms',

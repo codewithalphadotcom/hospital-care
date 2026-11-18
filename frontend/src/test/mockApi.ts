@@ -20,6 +20,8 @@ import type {
 } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import { AUDIT_EXPORT_LIMIT, type AuditEntry } from '../api/audit'
+import { BLOOD_GROUPS, COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
+import { DONOR_SLOT_MINUTES, type Appointment, type Donor, type DonorInput, type ScreeningInput } from '../api/donors'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
 import type { Ambulance, AmbulanceAction, AmbulanceInput, AmbulanceType } from '../api/ambulances'
 import type {
@@ -46,6 +48,7 @@ import { sampleBedBoard } from './fixtures/beds'
 import { auditCsv, filterAudit, karachiDay, sampleAuditEntries } from './fixtures/audit'
 import { sampleBloodUnits } from './fixtures/blood'
 import { sampleCommandCentre } from './fixtures/commandCentre'
+import { sampleAppointments, sampleDonors, sampleDonorUnits } from './fixtures/donors'
 import { sampleCandidates, sampleCases, sampleLocalAvailable, sampleNetworkRequests } from './fixtures/emergencies'
 import { sampleCapabilities, sampleHospitals, sampleUsers } from './fixtures/hospitals'
 import { sampleMedicines } from './fixtures/pharmacy'
@@ -200,6 +203,10 @@ type StaffApiOptions = {
   audit?: AuditEntry[]
   /** Start with these notifications for the signed-in user (story #52). */
   notifications?: Notification[]
+  /** Start with these donors (B11). Defaults to the synthetic sample. */
+  donors?: Donor[]
+  /** Start with these donation appointments (B11). Defaults to the synthetic sample. */
+  appointments?: Appointment[]
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -302,6 +309,8 @@ export function mockStaffApi({
   commandCentre: customCommandCentre,
   audit: customAudit,
   notifications: seedNotifications = [],
+  donors: customDonors,
+  appointments: customAppointments,
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -550,6 +559,17 @@ export function mockStaffApi({
   const ambulances = sampleAmbulances(now)
   const auditEntries = customAudit ?? sampleAuditEntries(now)
   const rooms = sampleOperatingRooms(now)
+
+  // Donors (B11). The server scopes them to the user's hospital (admins see all), so the mock does the same.
+  // Every mock user works at hospital HOSPITAL_ID, as userFor says.
+  const HOSPITAL_ID = 1
+  const donors = customDonors ?? sampleDonors(now)
+  const donorUnits = sampleDonorUnits(now)
+  const appointments = customAppointments ?? sampleAppointments(now)
+  let nextDonorNumber = Math.max(0, ...donors.map((d) => Number(d.id.slice(4)))) + 1
+  let nextAppointmentId = Math.max(0, ...appointments.map((a) => a.id)) + 1
+  const inMyHospital = (row: { hospitalId: number | null }) => role === 'admin' || row.hospitalId === HOSPITAL_ID
+  const findDonor = (code: string) => donors.find((d) => d.id === code)
   const bookings = sampleOrBookings(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
     role && role !== 'patient' && canSee(role, module) ? reply() : fail(403)
@@ -619,6 +639,106 @@ export function mockStaffApi({
       else if (REQUIRED_TESTS.every((t) => passedTests.has(t.id))) unit.status = 'available'
       return { status: 201, body: unitDetailBody(unit) }
     },
+    'GET /blood/donors/': view('donors', ({ query }) => {
+      const q = (query.get('q') ?? '').trim().toLowerCase()
+      const group = query.get('bloodGroup')
+      const matched = donors.filter(
+        (d) =>
+          inMyHospital(d) &&
+          (!q || d.fullName.toLowerCase().includes(q) || d.id.toLowerCase() === q || d.phone.includes(q)) &&
+          (!group || d.bloodGroup === group),
+      )
+      return ok(matched.slice(0, 200))
+    }),
+    'POST /blood/donors/': edit('donors', ({ body }) => {
+      const input = body as DonorInput
+      if (!input.fullName?.trim()) return fail(400, { fullName: ['This field may not be blank.'] })
+      if (!BLOOD_GROUPS.includes(input.bloodGroup)) return fail(400, { bloodGroup: [`"${input.bloodGroup}" is not a valid choice.`] })
+      const created: Donor = {
+        id: `DNR-${String(nextDonorNumber++).padStart(5, '0')}`,
+        fullName: input.fullName.trim(),
+        bloodGroup: input.bloodGroup,
+        phone: input.phone ?? '',
+        email: input.email ?? '',
+        lastDonationAt: null,
+        eligible: true,
+        ineligibleReason: '',
+        eligibleFrom: null,
+        hospitalId: HOSPITAL_ID,
+      }
+      donors.push(created)
+      return { status: 201, body: created }
+    }),
+    'GET /blood/donors/:code/': view('donors', ({ params }) => {
+      const donor = findDonor(params.code)
+      return donor && inMyHospital(donor) ? ok({ ...donor, units: donorUnits[donor.id] ?? [] }) : fail(404)
+    }),
+    'POST /blood/donors/:code/screening/': edit('donors', ({ params, body }) => {
+      const donor = findDonor(params.code)
+      if (!donor) return fail(404)
+      if (!inMyHospital(donor)) return fail(403, { detail: 'You can only screen donors registered at your own hospital.' })
+      const input = body as ScreeningInput
+      const reason = (input.reason ?? '').trim()
+      if (!input.eligible && !reason) return fail(400, { reason: ['Say why the donor is not eligible.'] })
+      if (input.deferredUntil && input.deferredUntil <= dateKey(new Date())) {
+        return fail(400, { deferredUntil: ['The deferral must end in the future (or leave it empty for permanent).'] })
+      }
+      Object.assign(
+        donor,
+        input.eligible
+          ? { eligible: true, ineligibleReason: '', eligibleFrom: null }
+          : { eligible: false, ineligibleReason: reason, eligibleFrom: input.deferredUntil ?? null },
+      )
+      return ok(donor)
+    }),
+    'GET /blood/appointments/': view('donors', () =>
+      ok(
+        appointments.filter(
+          (a) => a.status === 'booked' && new Date(a.startsAt).getTime() > Date.now() && inMyHospital(a),
+        ),
+      ),
+    ),
+    'POST /blood/appointments/': edit('donors', ({ body }) => {
+      const input = body as { donorId: string; startsAt: string }
+      const donor = findDonor(input.donorId)
+      if (!donor) return fail(400, { donorId: [`Object with code=${input.donorId} does not exist.`] })
+      if (!inMyHospital(donor)) return fail(403, { detail: 'You can only book donors registered at your own hospital.' })
+      const start = new Date(input.startsAt)
+      const minuteOfDay = start.getHours() * 60 + start.getMinutes()
+      if (start.getSeconds() || minuteOfDay % DONOR_SLOT_MINUTES) {
+        return fail(400, { startsAt: [`Appointments start on a ${DONOR_SLOT_MINUTES}-minute slot (e.g. 10:00, 10:30).`] })
+      }
+      if (start.getTime() <= Date.now()) return fail(400, { startsAt: ['Pick a time in the future.'] })
+      if (!donor.eligible && (!donor.eligibleFrom || dateKey(start) < donor.eligibleFrom)) {
+        return fail(400, { donorId: [`This donor can't be booked: ${donor.ineligibleReason}`] })
+      }
+      const upcoming = (a: Appointment) => a.status === 'booked' && new Date(a.startsAt).getTime() > Date.now()
+      if (appointments.some((a) => upcoming(a) && a.donorId === donor.id)) {
+        return fail(400, { donorId: ['This donor already has an upcoming appointment.'] })
+      }
+      if (appointments.some((a) => a.status === 'booked' && a.hospitalId === HOSPITAL_ID && new Date(a.startsAt).getTime() === start.getTime())) {
+        return fail(400, { startsAt: ['That slot is already booked.'] })
+      }
+      const created: Appointment = {
+        id: nextAppointmentId++,
+        donorId: donor.id,
+        donorName: donor.fullName,
+        startsAt: start.toISOString(),
+        slotMinutes: DONOR_SLOT_MINUTES,
+        status: 'booked',
+        hospitalId: HOSPITAL_ID,
+      }
+      appointments.push(created)
+      return { status: 201, body: created }
+    }),
+    'POST /blood/appointments/:id/cancel/': edit('donors', ({ params }) => {
+      const appointment = appointments.find((a) => a.id === Number(params.id))
+      if (!appointment) return fail(404)
+      if (!inMyHospital(appointment)) return fail(403, { detail: 'You can only cancel appointments at your own hospital.' })
+      if (appointment.status !== 'booked') return fail(409, { detail: 'This appointment is already cancelled.' })
+      appointment.status = 'cancelled'
+      return ok(appointment)
+    }),
     'GET /pharmacy/stock/': gate('pharmacy', () => ok(sampleMedicines(now))),
     'POST /beds/:id/actions/': ({ params, body }) => {
       if (!role || role === 'patient' || !canEdit(role, 'beds')) return fail(403)

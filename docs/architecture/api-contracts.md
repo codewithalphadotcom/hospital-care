@@ -12,14 +12,14 @@ unknown id, **400** `{field: ["message"]}` for invalid input.
 `ACCESS` in `backend/apps/accounts/permissions.py` and `frontend/src/features/staff/roles.ts` must stay
 identical. Reads need *view*, writes need *edit*.
 
-| Role | overview | emergencies | beds | blood | pharmacy | hospitals | users | equipment | operatingRooms | orBookings | transfers | ambulances | commandCentre | audit |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| admin | view | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | view | view |
-| doctor | view | edit | view | view | view | view | – | view | view | edit | edit | view | – | – |
-| nurse | view | edit | edit | – | view | view | – | edit | edit | edit | edit | edit | – | – |
-| bloodBank | view | view | – | edit | – | view | – | – | – | – | edit | – | – | – |
-| pharmacist | view | view | – | – | edit | view | – | – | – | – | – | – | – | – |
-| patient | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
+| Role | overview | emergencies | beds | blood | donors | pharmacy | hospitals | users | equipment | operatingRooms | orBookings | transfers | ambulances | commandCentre | audit |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| admin | view | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | edit | view | view |
+| doctor | view | edit | view | view | – | view | view | – | view | view | edit | edit | view | – | – |
+| nurse | view | edit | edit | – | – | view | view | – | edit | edit | edit | edit | edit | – | – |
+| bloodBank | view | view | – | edit | edit | – | view | – | – | – | – | edit | – | – | – |
+| pharmacist | view | view | – | – | – | edit | view | – | – | – | – | – | – | – | – |
+| patient | – | – | – | – | – | – | – | – | – | – | – | – | – | – | – |
 
 `emergencies` was added in Sprint 7 with #30 (see [api.md](api.md#emergency-cases-30-32)). `transfers` was added with
 B01 (#47): it lets a role use the transfer endpoints at all. Who may ask, approve, ship or receive is narrowed per move
@@ -36,6 +36,8 @@ endpoint is in [api.md](api.md#city-command-centre-55).
 
 Notifications (#52) are not a module and have no row here. Any signed-in staff member may read their own (`IsStaff` in
 `apps/accounts/permissions.py`); patients and signed-out users get 403 (see [api.md](api.md#notifications-52)).
+
+`donors` (B11) covers the donor endpoints: names, phones and emails, screening and donation appointments. Only admin and blood bank may use it, so doctors, nurses and pharmacists get **403** there (they can still read blood units). It has its own nav item, **Donors**.
 
 **Own hospital only:** a user who isn't an admin may change a resource only if it belongs to their own
 hospital (`resource.hospital == user.hospital`); otherwise **403**. Admins manage the whole network.

@@ -1,7 +1,7 @@
 /**
  * QA smoke: what the app actually ships today (public home, auth, staff RBAC, admin modules).
  */
-import { render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -222,6 +222,35 @@ describe('QA · staff workspace', () => {
   it('nurse cannot open blood bank by URL', async () => {
     mockStaffApi({ role: 'nurse' })
     renderStaff('/staff/blood')
+    expect(await screen.findByRole('heading', { name: 'You don’t have access to this page' })).toBeInTheDocument()
+  })
+
+  it('blood bank nav links to donors; doctor and nurse nav hide them', async () => {
+    mockStaffApi({ role: 'bloodBank' })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    const bloodBankLabels = within(screen.getByRole('navigation', { name: 'Staff' }))
+      .getAllByRole('link')
+      .map((a) => a.textContent)
+    expect(bloodBankLabels).toEqual(expect.arrayContaining(['Donors']))
+    expect(screen.getByRole('link', { name: 'Donors' })).toHaveAttribute('href', '/staff/donors')
+    cleanup()
+
+    for (const role of ['doctor', 'nurse'] as const) {
+      mockStaffApi({ role })
+      renderStaff('/staff')
+      await screen.findByRole('navigation', { name: 'Staff' })
+      const labels = within(screen.getByRole('navigation', { name: 'Staff' }))
+        .getAllByRole('link')
+        .map((a) => a.textContent)
+      expect(labels).not.toContain('Donors')
+      cleanup()
+    }
+  })
+
+  it('doctor cannot open donors by URL', async () => {
+    mockStaffApi({ role: 'doctor' })
+    renderStaff('/staff/donors')
     expect(await screen.findByRole('heading', { name: 'You don’t have access to this page' })).toBeInTheDocument()
   })
 

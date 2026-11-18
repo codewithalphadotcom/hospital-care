@@ -15,6 +15,7 @@ ACCESS: dict[str, dict[str, str]] = {
         "emergencies": EDIT,
         "beds": EDIT,
         "blood": EDIT,
+        "donors": EDIT,
         "pharmacy": EDIT,
         "hospitals": EDIT,
         "users": EDIT,
@@ -55,6 +56,7 @@ ACCESS: dict[str, dict[str, str]] = {
         "overview": VIEW,
         "emergencies": VIEW,
         "blood": EDIT,
+        "donors": EDIT,  # personal data (names, phones, emails): doctors and nurses don't see donors
         "hospitals": VIEW,
         "transfers": EDIT,
     },

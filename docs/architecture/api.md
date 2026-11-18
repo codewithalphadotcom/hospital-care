@@ -45,8 +45,9 @@ updated its stored status yet.
 
 ## Blood bank (Sprint 3)
 
-Every endpoint needs **blood: view** to read and **blood: edit** to change (admin, bloodBank). Staff only see and
-change their own hospital's units, donors and appointments (**403** otherwise). Every change is audit-logged.
+Units need **blood: view** to read and **blood: edit** to change (admin, bloodBank). Donors and appointments need
+**donors: view** / **donors: edit** (admin, bloodBank; see [api-contracts](api-contracts.md#access-stories-12)). Staff only see
+and change their own hospital's units, donors and appointments (**403** otherwise). Every change is audit-logged.
 
 | Method | Path | Body | Success | Story |
 |---|---|---|---|---|
@@ -79,10 +80,11 @@ BloodStock = {
 Donor = {
   id: string, fullName: string, bloodGroup: string, phone: string, email: string,
   lastDonationAt: string | null,
-  eligible: boolean, ineligibleReason: string, eligibleFrom: string | null  // null + ineligible = permanent
+  eligible: boolean, ineligibleReason: string, eligibleFrom: string | null,  // null + ineligible = permanent
+  hospitalId: number | null  // read-only; null for a donor an admin registered with no hospital
 }
 Appointment = { id: number, donorId: string, donorName: string, startsAt: string, slotMinutes: number,
-                status: 'booked' | 'cancelled' }
+                status: 'booked' | 'cancelled', hospitalId: number | null }  // hospitalId read-only
 ```
 
 **Rules**
@@ -103,6 +105,8 @@ Appointment = { id: number, donorId: string, donorName: string, startsAt: string
 - **Appointments (#22):** on a `BLOOD_APPOINTMENT_SLOT_MINUTES` (30) boundary, in the future. One booked donor
   per hospital per slot (the database enforces it, so two people booking at once can't both win → 400).
   Ineligible donors and donors who already have an upcoming appointment → 400. A cancelled slot can be rebooked.
+- **Cross-hospital (B11):** booking, screening or cancelling a donor or appointment of another hospital → **403**
+  (admins: any hospital). The booking goes to the actor's hospital, or the donor's if the actor has none.
 
 All four `BLOOD_*` settings can be changed with environment variables of the same name.
 
