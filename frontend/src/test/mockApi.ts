@@ -18,7 +18,6 @@ import type {
   Severity,
   StatusChange,
 } from '../api/emergencies'
-import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import { AUDIT_EXPORT_LIMIT, type AuditEntry } from '../api/audit'
 import { BLOOD_GROUPS, COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import { DONOR_SLOT_MINUTES, type Appointment, type Donor, type DonorInput, type ScreeningInput } from '../api/donors'
