@@ -21,6 +21,8 @@ const caseOf = (status: CaseStatus, severity: Severity = 'moderate'): EmergencyC
 const transferOf = (id: number, status: TransferStatus, { supplier = CITYCARE, receiver = RIVERSIDE } = {}): Transfer => ({
   id,
   case: { reference: 'EC-2026-0002', severity: 'critical' },
+  trip: null,
+  etaMinutes: 12,
   itemId: 1,
   resourceType: 'blood',
   need: 'O- red cells',
