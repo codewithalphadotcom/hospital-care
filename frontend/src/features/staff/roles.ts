@@ -5,6 +5,7 @@ export type Module =
   | 'transfers'
   | 'beds'
   | 'blood'
+  | 'donors'
   | 'pharmacy'
   | 'equipment'
   | 'operatingRooms'
@@ -26,6 +27,7 @@ export const MODULES: readonly { id: Module; label: string; path: string }[] = [
   { id: 'transfers', label: 'Transfers', path: '/staff/transfers' },
   { id: 'beds', label: 'Beds', path: '/staff/beds' },
   { id: 'blood', label: 'Blood bank', path: '/staff/blood' },
+  { id: 'donors', label: 'Donors', path: '/staff/donors' },
   { id: 'pharmacy', label: 'Pharmacy', path: '/staff/pharmacy' },
   { id: 'equipment', label: 'Equipment', path: '/staff/equipment' },
   { id: 'operatingRooms', label: 'Operating rooms', path: '/staff/operating-rooms' },
@@ -52,6 +54,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     transfers: 'edit',
     beds: 'edit',
     blood: 'edit',
+    donors: 'edit',
     pharmacy: 'edit',
     equipment: 'edit',
     operatingRooms: 'edit',
@@ -82,7 +85,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     orBookings: 'edit',
     hospitals: 'view',
   },
-  bloodBank: { overview: 'view', emergencies: 'view', transfers: 'edit', blood: 'edit', hospitals: 'view' },
+  bloodBank: { overview: 'view', emergencies: 'view', transfers: 'edit', blood: 'edit', donors: 'edit', hospitals: 'view' },
   pharmacist: { overview: 'view', emergencies: 'view', pharmacy: 'edit', hospitals: 'view' },
 }
 
