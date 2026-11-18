@@ -12,6 +12,7 @@ VIEW, EDIT = "view", "edit"
 ACCESS: dict[str, dict[str, str]] = {
     Role.ADMIN: {
         "overview": VIEW,
+        "alerts": VIEW,  # the user's own notifications (B07); a personal list, so view only
         "emergencies": EDIT,
         "beds": EDIT,
         "blood": EDIT,
@@ -28,6 +29,7 @@ ACCESS: dict[str, dict[str, str]] = {
     },
     Role.DOCTOR: {
         "overview": VIEW,
+        "alerts": VIEW,
         "emergencies": EDIT,
         "beds": VIEW,
         "blood": VIEW,
@@ -41,6 +43,7 @@ ACCESS: dict[str, dict[str, str]] = {
     },
     Role.NURSE: {
         "overview": VIEW,
+        "alerts": VIEW,
         "emergencies": EDIT,
         "beds": EDIT,
         "pharmacy": VIEW,
@@ -53,6 +56,7 @@ ACCESS: dict[str, dict[str, str]] = {
     },
     Role.BLOOD_BANK: {
         "overview": VIEW,
+        "alerts": VIEW,
         "emergencies": VIEW,
         "blood": EDIT,
         "hospitals": VIEW,
@@ -60,6 +64,7 @@ ACCESS: dict[str, dict[str, str]] = {
     },
     Role.PHARMACIST: {
         "overview": VIEW,
+        "alerts": VIEW,
         "emergencies": VIEW,
         "pharmacy": EDIT,
         "hospitals": VIEW,
