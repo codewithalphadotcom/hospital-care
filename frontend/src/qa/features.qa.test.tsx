@@ -192,6 +192,33 @@ describe('QA · staff workspace', () => {
     expect(labels).not.toContain('Transfers')
   })
 
+  it.each(['nurse', 'doctor'] as const)('%s nav links to ambulances', async (role) => {
+    mockStaffApi({ role })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    const labels = within(screen.getByRole('navigation', { name: 'Staff' }))
+      .getAllByRole('link')
+      .map((a) => a.textContent)
+    expect(labels).toEqual(expect.arrayContaining(['Ambulances']))
+    expect(screen.getByRole('link', { name: 'Ambulances' })).toHaveAttribute('href', '/staff/ambulances')
+  })
+
+  it.each(['bloodBank', 'pharmacist'] as const)('%s nav hides ambulances', async (role) => {
+    mockStaffApi({ role })
+    renderStaff('/staff')
+    await screen.findByRole('navigation', { name: 'Staff' })
+    const labels = within(screen.getByRole('navigation', { name: 'Staff' }))
+      .getAllByRole('link')
+      .map((a) => a.textContent)
+    expect(labels).not.toContain('Ambulances')
+  })
+
+  it('nurse can open ambulances', async () => {
+    mockStaffApi({ role: 'nurse' })
+    renderStaff('/staff/ambulances')
+    expect(await screen.findByRole('table', { name: 'Ambulances' })).toBeInTheDocument()
+  })
+
   it('nurse cannot open blood bank by URL', async () => {
     mockStaffApi({ role: 'nurse' })
     renderStaff('/staff/blood')
