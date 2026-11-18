@@ -19,7 +19,7 @@ import type {
 } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
-import type { Ambulance, AmbulanceAction, AmbulanceInput, AmbulanceType } from '../api/ambulances'
+import { AMBULANCE_STATUSES, type Ambulance, type AmbulanceAction, type AmbulanceInput, type AmbulanceType } from '../api/ambulances'
 import type {
   OperatingRoom,
   OperatingRoomAction,
@@ -30,7 +30,8 @@ import type {
 } from '../api/operatingRooms'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
 import type { PublicStatus } from '../api/publicStatus'
-import { TRANSFER_STATUS_LABEL, type Transfer, type TransferAction, type TransferRequestInput, type TransferResourceType, type TransferStatus } from '../api/transfers'
+import { TRANSFER_STATUS_LABEL, type Transfer, type TransferAction, type TransferMove, type TransferRequestInput, type TransferResourceType, type TransferStatus } from '../api/transfers'
+import { TRIP_STATUS_LABEL, type Trip, type TripAction, type TripStatus } from '../api/trips'
 import type { UserSummary } from '../api/users'
 import { applyAction } from '../features/beds/beds'
 import { actionsFor, nextStatus, STATUS_LABEL } from '../features/emergencies/emergencies'
@@ -113,6 +114,16 @@ const TRANSFER_MOVES: readonly { action: TransferAction; from: readonly Transfer
 /** Transfer holds don't expire: a far-future stamp keeps them out of the expiry sweep, as the server does. */
 const NO_EXPIRY = '9999-12-31T23:59:59.000Z'
 
+/** The estimated trip time the mock gives every trip (the server works it out from hospital coordinates). */
+const TRIP_ETA_MINUTES = 25
+
+/** The trip's steps (story #51): the status each step starts from, and the status it reaches. */
+const TRIP_MOVES: readonly { action: TripAction; from: TripStatus; to: TripStatus }[] = [
+  { action: 'depart', from: 'dispatched', to: 'enRoute' },
+  { action: 'arrive', from: 'enRoute', to: 'arrived' },
+  { action: 'complete', from: 'arrived', to: 'completed' },
+]
+
 /** The transfers the mock supplies when a test doesn't say what the supplier has free. */
 const DEFAULT_SUPPLY = 5
 
@@ -184,6 +195,8 @@ type StaffApiOptions = {
   held?: { reference: string; itemId: number; count: number }[]
   /** Start with these transfers (stories #47 to #49). Approved, dispatched and in-transit ones set their units aside. */
   transfers?: Transfer[]
+  /** Use these ambulances (story #50) instead of the sample ones. */
+  ambulances?: Ambulance[]
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -207,7 +220,7 @@ const HOME_HOSPITAL = 'CityCare General Hospital'
 export function sampleAmbulances(now: Date): Ambulance[] {
   const at = now.toISOString()
   const vehicle = (id: number, identifier: string, type: AmbulanceType, status: Ambulance['status'], hospital: string) =>
-    ({ id, identifier, type, status, statusSince: at, hospital }) satisfies Ambulance
+    ({ id, identifier, type, status, statusSince: at, hospital, trip: null }) satisfies Ambulance
   return [
     vehicle(1, 'AMB-01', 'advanced', 'available', HOME_HOSPITAL),
     vehicle(2, 'AMB-02', 'basic', 'maintenance', HOME_HOSPITAL),
@@ -283,6 +296,7 @@ export function mockStaffApi({
   stock: customStock,
   held: seedHolds = [],
   transfers: seedTransfers = [],
+  ambulances: customAmbulances,
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -508,12 +522,57 @@ export function mockStaffApi({
     const hospital = who === 'supplier' ? t.supplier.id : t.receiver.id
     return canEdit(role, TYPE_MODULE[t.resourceType]) && reachesHospital(hospital)
   }
-  /** The transfer as this user gets it: its units set aside now, and the moves they may make now. */
-  const transferView = (t: Transfer): Transfer => ({
-    ...t,
-    resources: transferHolds(t).filter((h) => h.status === 'held').map((h) => h.resource),
-    actions: TRANSFER_MOVES.filter((m) => m.from.includes(t.status) && mayMove(t, m.who)).map((m) => m.action),
-  })
+  /**
+   * The transfer as this user gets it: its units set aside now, its latest trip, and the moves they may make now. While a
+   * trip carries it, no manual move is offered; an approved one offers dispatching an ambulance (story #51).
+   */
+  const transferView = (t: Transfer): Transfer => {
+    const trip = latestTripOf(t)
+    const moves: TransferMove[] = activeTripOf(t)
+      ? []
+      : TRANSFER_MOVES.filter((m) => m.from.includes(t.status) && mayMove(t, m.who)).map((m) => m.action)
+    if (!activeTripOf(t) && t.status === 'approved' && mayStepTrip(t.supplier.id)) moves.push('dispatchAmbulance')
+    return {
+      ...t,
+      resources: transferHolds(t).filter((h) => h.status === 'held').map((h) => h.resource),
+      // A seeded transfer keeps its seeded trip until the mock has a trip of its own for it.
+      trip: trip ? tripView(trip) : t.trip,
+      etaMinutes: TRIP_ETA_MINUTES,
+      actions: moves,
+    }
+  }
+  /** The trips carried so far (story #51). A trip is active until it completes. */
+  const trips: { id: number; transferId: number; ambulanceId: number; status: TripStatus; stamps: Partial<Record<'departedAt' | 'arrivedAt' | 'completedAt', string>>; dispatchedBy: string; dispatchedAt: string }[] = []
+  let nextTripId = 1
+  const activeTripOf = (t: Transfer) => trips.find((x) => x.transferId === t.id && x.status !== 'completed')
+  const latestTripOf = (t: Transfer) => [...trips].reverse().find((x) => x.transferId === t.id)
+  const mayStepTrip = (supplierId: number) => !!role && role !== 'patient' && canEdit(role, 'ambulances') && reachesHospital(supplierId)
+  /** The trip as the user gets it: its times and the steps they may take now (the server's TripSerializer). */
+  const tripView = (trip: (typeof trips)[number]): Trip => {
+    const t = transfers.find((x) => x.id === trip.transferId)!
+    const vehicle = ambulances.find((a) => a.id === trip.ambulanceId)!
+    const step = TRIP_MOVES.find((m) => m.from === trip.status)
+    return {
+      id: trip.id,
+      transferId: trip.transferId,
+      status: trip.status,
+      ambulance: { id: vehicle.id, identifier: vehicle.identifier, type: vehicle.type },
+      etaMinutes: TRIP_ETA_MINUTES,
+      dispatchedBy: trip.dispatchedBy,
+      dispatchedAt: trip.dispatchedAt,
+      departedAt: trip.stamps.departedAt ?? null,
+      arrivedAt: trip.stamps.arrivedAt ?? null,
+      completedAt: trip.stamps.completedAt ?? null,
+      actions: step && mayStepTrip(t.supplier.id) ? [step.action] : [],
+    }
+  }
+  /** The ambulance as the list shows it: its status, and the trip it is on, if any. */
+  const ambulanceView = (a: Ambulance): Ambulance => {
+    // A seeded ambulance keeps its seeded trip until the mock has trips of its own for it.
+    if (!trips.some((x) => x.ambulanceId === a.id)) return a
+    const trip = trips.find((x) => x.ambulanceId === a.id && x.status !== 'completed')
+    return { ...a, trip: trip ? { id: trip.id, status: trip.status as 'dispatched' | 'enRoute' | 'arrived', transferId: trip.transferId } : null }
+  }
   const transfersOfCase = (reference: string) =>
     transfers
       .filter((t) => t.case.reference === reference)
@@ -528,7 +587,7 @@ export function mockStaffApi({
   }
 
   const equipment = sampleEquipment(now)
-  const ambulances = sampleAmbulances(now)
+  const ambulances = customAmbulances ?? sampleAmbulances(now)
   const rooms = sampleOperatingRooms(now)
   const bookings = sampleOrBookings(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
@@ -788,6 +847,8 @@ export function mockStaffApi({
       if (input.quantity > askable) return fail(400, { detail: `Only ${Math.max(askable, 0)} more can be asked for this need.` })
       const created: Transfer = {
         id: nextTransferId++,
+        trip: null,
+        etaMinutes: TRIP_ETA_MINUTES,
         case: { reference: found.id, severity: found.severity },
         itemId: input.itemId,
         resourceType: transferableType(need)!,
@@ -826,6 +887,9 @@ export function mockStaffApi({
       const { action, reason = '', note = '' } = body as { action: TransferAction; reason?: string; note?: string }
       const move = TRANSFER_MOVES.find((m) => m.action === action)
       if (!move) return fail(400, { action: ['Not a transfer action.'] })
+      if (activeTripOf(t) && mayMove(t, move.who)) {
+        return fail(409, { detail: 'An ambulance is carrying this transfer. Use the trip’s steps instead.' })
+      }
       if (!move.from.includes(t.status)) {
         return fail(409, { detail: `Can't ${action} a transfer that is ${TRANSFER_STATUS_LABEL[t.status].toLowerCase()}.` })
       }
@@ -893,8 +957,19 @@ export function mockStaffApi({
       }
       return ok(equipment[index])
     }),
-    // Staff see their own hospital's ambulances; admins see all of them (story #50).
-    'GET /ambulances/': view('ambulances', () => ok(role === 'admin' ? ambulances : ambulances.filter((a) => a.hospital === HOME_HOSPITAL))),
+    // Staff see their own hospital's ambulances; admins see all of them (story #50). `status` and `hospital` (an id) filter.
+    'GET /ambulances/': view('ambulances', ({ query }) => {
+      const status = query.get('status')
+      const hospitalId = query.get('hospital')
+      const hospital = hospitalId ? hospitals.find((h) => h.id === Number(hospitalId))?.name : undefined
+      return ok(
+        ambulances
+          .filter((a) => role === 'admin' || a.hospital === HOME_HOSPITAL)
+          .filter((a) => !status || a.status === status)
+          .filter((a) => !hospitalId || a.hospital === hospital)
+          .map(ambulanceView),
+      )
+    }),
     'POST /ambulances/': edit('ambulances', ({ body }) => {
       const input = body as AmbulanceInput
       // Admins name the base hospital; everyone else registers at their own, and a hospital id they send is ignored.
@@ -904,19 +979,73 @@ export function mockStaffApi({
       if (ambulances.some((a) => a.identifier === tag && a.hospital === hospital)) {
         return fail(400, { identifier: ['This asset tag is already registered at this hospital.'] })
       }
-      const created: Ambulance = { id: nextId++, identifier: tag, type: input.type, status: 'available', statusSince: now.toISOString(), hospital }
+      const created: Ambulance = { id: nextId++, identifier: tag, type: input.type, status: 'available', statusSince: now.toISOString(), hospital, trip: null }
       ambulances.push(created)
       return { status: 201, body: created }
     }),
     'POST /ambulances/:id/actions/': edit('ambulances', ({ params, body }) => {
       const index = ambulances.findIndex((a) => a.id === Number(params.id))
       if (index < 0 || (role !== 'admin' && ambulances[index].hospital !== HOME_HOSPITAL)) return fail(404)
+      const action = (body as { action: string }).action
+      if (action === 'dispatch' || action === 'release') {
+        return fail(409, { detail: 'A trip moves this vehicle. Use the transfer’s trip instead.' })
+      }
       try {
-        ambulances[index] = applyAmbulanceAction(ambulances[index], (body as { action: AmbulanceAction }).action, new Date())
+        ambulances[index] = applyAmbulanceAction(ambulances[index], action as AmbulanceAction, new Date())
       } catch (error) {
         return fail(409, { detail: (error as Error).message })
       }
-      return ok(ambulances[index])
+      return ok(ambulanceView(ambulances[index]))
+    }),
+    // Trips (story #51): an approved transfer is sent with an available ambulance from its supplier, then stepped.
+    'POST /transfers/:id/trips/': edit('ambulances', ({ params, body }) => {
+      const t = transfers.find((x) => x.id === Number(params.id))
+      if (!t || !(reachesHospital(t.supplier.id) || reachesHospital(t.receiver.id))) return fail(404)
+      if (!mayStepTrip(t.supplier.id)) return fail(403, { detail: 'Only staff at the supplying hospital can dispatch an ambulance.' })
+      if (t.status !== 'approved') {
+        return fail(409, { detail: `Can't dispatch a transfer that is ${TRANSFER_STATUS_LABEL[t.status].toLowerCase()}.` })
+      }
+      const ambulanceId = Number((body as { ambulance?: number }).ambulance)
+      const vehicle = ambulances.find((a) => a.id === ambulanceId && (role === 'admin' || a.hospital === HOME_HOSPITAL))
+      if (!vehicle) return fail(404)
+      const status = AMBULANCE_STATUSES.find((x) => x.value === vehicle.status)!.label.toLowerCase()
+      if (vehicle.status !== 'available') return fail(409, { detail: `Can't dispatch a vehicle that is ${status}.` })
+      if (vehicle.hospital !== t.supplier.name) {
+        return fail(400, { ambulance: ['Only an ambulance based at the supplying hospital can carry this transfer.'] })
+      }
+      const at = new Date().toISOString()
+      vehicle.status = 'dispatched'
+      vehicle.statusSince = at
+      t.history = [...t.history, { fromStatus: t.status, toStatus: 'dispatched', action: 'dispatch', note: '', actor: role ? NAMES[role] : null, at }]
+      t.status = 'dispatched'
+      const trip = { id: nextTripId++, transferId: t.id, ambulanceId: vehicle.id, status: 'dispatched' as const, stamps: {}, dispatchedBy: role ? NAMES[role] : '', dispatchedAt: at }
+      trips.push(trip)
+      return { status: 201, body: tripView(trip) }
+    }),
+    'POST /trips/:id/actions/': edit('ambulances', ({ params, body }) => {
+      const trip = trips.find((x) => x.id === Number(params.id))
+      const t = trip && transfers.find((x) => x.id === trip.transferId)
+      if (!trip || !t || !(reachesHospital(t.supplier.id) || reachesHospital(t.receiver.id))) return fail(404)
+      if (!mayStepTrip(t.supplier.id)) return fail(403, { detail: 'Only staff at the supplying hospital can move a trip.' })
+      const { action } = body as { action: TripAction }
+      const step = TRIP_MOVES.find((m) => m.action === action && m.from === trip.status)
+      if (!step) return fail(409, { detail: `Can't ${action} a trip that is ${TRIP_STATUS_LABEL[trip.status].toLowerCase()}.` })
+      const at = new Date().toISOString()
+      const vehicle = ambulances.find((a) => a.id === trip.ambulanceId)!
+      if (action === 'depart') {
+        t.history = [...t.history, { fromStatus: t.status, toStatus: 'inTransit', action: 'startTransit', note: '', actor: role ? NAMES[role] : null, at }]
+        t.status = 'inTransit'
+        trip.stamps.departedAt = at
+      }
+      if (action === 'arrive') trip.stamps.arrivedAt = at
+      if (action === 'complete') {
+        // Completing frees the ambulance. The transfer stays in transit: the receiver confirms it (story #49).
+        trip.stamps.completedAt = at
+        vehicle.status = 'available'
+        vehicle.statusSince = at
+      }
+      trip.status = step.to
+      return ok(tripView(trip))
     }),
     'GET /operating-rooms/': view('operatingRooms', ({ query }) => {
       const capability = query.get('capability')
