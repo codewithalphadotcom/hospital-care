@@ -262,9 +262,13 @@ erDiagram
     }
     Notification {
         bigint id PK
-        bigint user_id FK
-        string event
-        bool read
+        bigint user_id FK "one row per recipient; index (user_id, read_at)"
+        string kind "the event, e.g. transfer.requested"
+        string severity "critical or info"
+        string message "up to 300 characters"
+        string link "a staff page path, may be empty"
+        datetime created_at
+        datetime read_at "empty until the person marks it read"
     }
 ```
 

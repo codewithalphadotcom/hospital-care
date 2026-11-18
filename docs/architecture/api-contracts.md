@@ -34,6 +34,9 @@ endpoint is in [api.md](api.md#city-command-centre-55).
 
 `audit` (#56) is the audit trail: admins only, and read only (`view`). Its endpoints are in [api.md](api.md#audit-trail-56).
 
+Notifications (#52) are not a module and have no row here. Any signed-in staff member may read their own (`IsStaff` in
+`apps/accounts/permissions.py`); patients and signed-out users get 403 (see [api.md](api.md#notifications-52)).
+
 **Own hospital only:** a user who isn't an admin may change a resource only if it belongs to their own
 hospital (`resource.hospital == user.hospital`); otherwise **403**. Admins manage the whole network.
 The bed board (`GET /beds/`) and blood list (`GET /blood/units/`) only return the user's hospital when they

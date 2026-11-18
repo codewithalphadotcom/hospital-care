@@ -19,4 +19,5 @@ urlpatterns = [
     path("api/ambulances/", include("apps.ambulances.urls")),
     path("api/command-centre/", include("apps.command_centre.urls")),
     path("api/audit/", include("apps.audit.urls")),
+    path("api/notifications/", include("apps.notifications.urls")),
 ]

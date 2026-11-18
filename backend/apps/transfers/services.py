@@ -9,7 +9,8 @@ from rest_framework.exceptions import PermissionDenied
 from apps.accounts.models import Role
 from apps.accounts.permissions import can_edit, may_change
 from apps.audit.services import record
-from apps.emergencies.models import EmergencyRequest, RequestItem, ResourceType
+from apps.emergencies.models import EmergencyRequest, RequestItem, ResourceType, Severity
+from apps.emergencies.serializers import need_label
 from apps.hospitals.models import Hospital
 from apps.matching.allocations import ALLOCATION_MODULE, AllocationRefused, allocate
 from apps.matching.models import Reservation, ReservationStatus
@@ -21,6 +22,7 @@ from apps.matching.reservations import (
     release,
     reserve,
 )
+from apps.notifications.services import notify
 from apps.resources.state_machine import TransitionNotAllowed
 
 from .models import LIVE, TRANSFER_LIFECYCLE, Transfer, TransferStatus, TransferStatusChange
@@ -30,6 +32,8 @@ from .models import LIVE, TRANSFER_LIFECYCLE, Transfer, TransferStatus, Transfer
 TRANSFERABLE = (ResourceType.BLOOD, ResourceType.EQUIPMENT)
 # The moves the supplier's staff make. The requester makes cancel and deliver.
 SUPPLIER_MOVES = ("approve", "reject", "dispatch", "startTransit")
+# The staff page a transfer's notifications link to (notification spec: Link).
+TRANSFER_LINK = "/staff/transfers"
 
 
 class TransferRefused(Exception):
@@ -153,7 +157,35 @@ def _move(transfer: Transfer, action: str, *, actor, note: str = "", reason: str
         after={"status": transfer.status},
         reason=note or action,
     )
+    _notify_move(transfer, action, actor=actor)
     return transfer
+
+
+def _notify_move(transfer: Transfer, action: str, *, actor) -> None:
+    """Tell the side that did not make the move (notification spec, Transfer rule). The supplier answers, so
+    the case side hears approved, rejected and dispatched. The requester cancels or confirms receipt, so
+    the supplier hears. Starting transit tells nobody: dispatched already did."""
+    supplier, receiver = transfer.supplier, transfer.receiver
+    if action in ("approve", "reject", "dispatch"):
+        verb = {"approve": "approved by", "reject": "rejected by", "dispatch": "dispatched by"}[action]
+        notify(
+            f"transfer.{transfer.status}",
+            hospital=receiver,
+            module="emergencies",
+            message=f"Transfer #{transfer.pk} {verb} {supplier.name}.",
+            link=TRANSFER_LINK,
+            actor=actor,
+        )
+    elif action in ("cancel", "deliver"):
+        verb = {"cancel": "cancelled by", "deliver": "received by"}[action]
+        notify(
+            f"transfer.{transfer.status}",
+            hospital=supplier,
+            module=ALLOCATION_MODULE[transfer.request_item.resource_type],
+            message=f"Transfer #{transfer.pk} {verb} {receiver.name}.",
+            link=TRANSFER_LINK,
+            actor=actor,
+        )
 
 
 # ── Requesting (story #47) ────────────────────────────────────────────────────────────────────────
@@ -204,6 +236,15 @@ def request_transfer(
         transfer,
         after={"status": transfer.status, "quantity": quantity},
         reason=f"For {case.reference}",
+    )
+    notify(
+        "transfer.requested",
+        hospital=supplier,
+        module=ALLOCATION_MODULE[need.resource_type],
+        severity=Severity.CRITICAL,
+        message=f"{transfer.receiver.name} asks for {quantity} of {need_label(need)} for {case.reference}.",
+        link=TRANSFER_LINK,
+        actor=actor,
     )
     return transfer
 

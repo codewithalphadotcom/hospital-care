@@ -824,6 +824,48 @@ are in `apps/audit/services.py`.
   logged.
 - **Queries:** a page costs two queries (one count, one select), however many rows it holds.
 
+## Notifications (#52)
+
+Staff are told about events at their hospital (see the [notification spec](../aidlc/inception/2026-11-18-notification-service.md)).
+Each row belongs to one person. Anyone signed in as staff (`IsStaff`) may read their own rows: patients and signed-out
+users get **403**. Admins without a hospital get an empty list. Shapes are in `frontend/src/api/notifications.ts`.
+
+| Method | Path | Success |
+|---|---|---|
+| GET | `/notifications/?unread=true` | 200 `Notification[]`, the user's 50 newest, newest first. `unread` is optional: `true` or `1` keeps only unread, `false` or `0` (or none) returns all. Any other value is 400. |
+| GET | `/notifications/unread-count/` | 200 `{count}` |
+| POST | `/notifications/<id>/read/` | 200 `Notification`, with `readAt` set |
+
+```ts
+Notification = {
+  id: number,
+  kind: string,                 // "case.created", "case.escalated", "reservation.created", "reservation.released",
+                                // "reservation.expired", "transfer.requested", "transfer.approved", "transfer.rejected",
+                                // "transfer.dispatched", "transfer.cancelled", "transfer.delivered"
+  severity: 'critical' | 'info',
+  message: string,              // up to 300 characters
+  link: string,                 // "/staff/emergencies/EC-2026-0001", "/staff/transfers", or "" when there is none
+  createdAt: string,
+  readAt: string | null         // null until read
+}
+```
+
+- **Who is told.** `notify` (in `apps/notifications/services.py`) is called next to the audit record of each event. It
+  writes one row for each active user whose hospital is the one named and whose role can edit the module named. The
+  actor who made the move is left out. A user with no hospital gets nothing.
+  - **Case side** (`emergencies` at the case's hospital): a critical case created (`critical`), a case escalated by hand or
+    automatically (`critical`), holds made, released or expired at the case's own hospital (`info`, one row per move, not
+    per unit), and the transfer answers approved, rejected and dispatched (`info`).
+  - **Supplier side** (the resource's module at the supplying hospital): a transfer requested (`critical`), and cancelled or
+    delivered (`info`). Blood goes to the blood bank and admins; equipment to nurses and admins.
+  - Starting transit notifies nobody. A hold at another hospital (a transfer's, at the supplier) notifies nobody.
+- **Rollback.** `notify` runs inside the move's transaction, so a move that rolls back keeps no notification.
+- **Read.** `readAt` is set once. A second call returns the row with the first time. Another person's row, or an unknown
+  id, is **404**.
+- **Audit.** Rows are not audit-logged: each copies an event that already is. Marking one read the first time writes
+  `notification.read` (target: the notification). A repeat call changes nothing and writes nothing.
+- **Admin.** Read-only. Rows are written by `notify` and only `read_at` is set by the API.
+
 ## Demo data
 
 ```bash

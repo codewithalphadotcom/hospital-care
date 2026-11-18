@@ -31,6 +31,7 @@ import type {
   OrCapability,
 } from '../api/operatingRooms'
 import type { HospitalInput, StructureKind } from '../api/hospitals'
+import type { Notification } from '../api/notifications'
 import type { PublicStatus } from '../api/publicStatus'
 import { TRANSFER_STATUS_LABEL, type Transfer, type TransferAction, type TransferRequestInput, type TransferResourceType, type TransferStatus } from '../api/transfers'
 import type { UserSummary } from '../api/users'
@@ -197,6 +198,8 @@ type StaffApiOptions = {
   commandCentre?: CommandCentre
   /** Use this audit trail instead of the sample one (B10, #56). */
   audit?: AuditEntry[]
+  /** Start with these notifications for the signed-in user (story #52). */
+  notifications?: Notification[]
 }
 
 /** A few pieces of equipment across types and statuses (story #26). */
@@ -298,6 +301,7 @@ export function mockStaffApi({
   transfers: seedTransfers = [],
   commandCentre: customCommandCentre,
   audit: customAudit,
+  notifications: seedNotifications = [],
 }: StaffApiOptions) {
   const now = new Date()
   const board = customBoard ?? sampleBedBoard(now)
@@ -569,6 +573,8 @@ export function mockStaffApi({
   let nextId = 100
   let nextAllocationId = 1
 
+  /** The signed-in user's notifications (story #52). Marking one read sets its `readAt` once, as the server does. */
+  const notifications: Notification[] = seedNotifications.map((n) => ({ ...n }))
   const fetchMock = mockApi({
     'GET /auth/me/': role ? ok(userFor(role)) : fail(403),
     'POST /auth/login/': role ? ok(userFor(role)) : fail(401, { detail: 'That email and password don’t match an account.' }),
@@ -765,6 +771,18 @@ export function mockStaffApi({
       const refusal = allocationRefusal(entry.c, entry.hold)
       if (refusal) return refusal
       return { status: 201, body: allocateHold(entry.c, entry.hold, ((body as { note?: string } | undefined)?.note ?? '').trim()) }
+    },
+    // Notifications (story #52). Every staff member may read their own; the mock has one user, so every row is theirs.
+    'GET /notifications/': ({ query }) => {
+      const unread = query.get('unread') === 'true'
+      return ok(notifications.filter((n) => !unread || n.readAt === null).slice(0, 50))
+    },
+    'GET /notifications/unread-count/': () => ok({ count: notifications.filter((n) => n.readAt === null).length }),
+    'POST /notifications/:id/read/': ({ params }) => {
+      const found = notifications.find((n) => n.id === Number(params.id))
+      if (!found) return fail(404)
+      if (found.readAt === null) found.readAt = new Date().toISOString()
+      return ok(found)
     },
     // Transfers between hospitals (stories #47 to #49). Reads need view, asks and moves need edit; each move is then checked
     // against the lifecycle (409), the role at the hospital concerned (403), and whether the user's hospital is involved at all (404).
