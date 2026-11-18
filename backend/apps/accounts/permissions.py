@@ -5,7 +5,7 @@ what this enforces. The table is in docs/architecture/api-contracts.md.
 
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
-from .models import Role
+from .models import STAFF_ROLES, Role
 
 VIEW, EDIT = "view", "edit"
 
@@ -102,3 +102,14 @@ def may_change(user, resource) -> bool:
     Rows from before Sprint 2 have no hospital and match users without one, so old data keeps working.
     """
     return user.effective_role == Role.ADMIN or resource.hospital_id == user.hospital_id
+
+
+class IsStaff(BasePermission):
+    """Signed in with a staff role, admins included (with or without a hospital). Patients and
+    signed-out users get 403. Personal data such as notifications has no module, so no ACCESS row."""
+
+    message = "Only staff can do this."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.effective_role in STAFF_ROLES)
