@@ -8,6 +8,7 @@ import SignupPage from './pages/SignupPage'
 import BedsPage from './pages/staff/BedsPage'
 import BloodPage from './pages/staff/BloodPage'
 import EmergenciesPage from './pages/staff/EmergenciesPage'
+import AmbulancesPage from './pages/staff/AmbulancesPage'
 import EmergencyFeedPage from './pages/staff/EmergencyFeedPage'
 import EmergencyCasePage from './pages/staff/EmergencyCasePage'
 import HospitalDetailPage from './pages/staff/HospitalDetailPage'
@@ -38,6 +39,7 @@ export function AppRoutes() {
         <Route path="blood" element={<BloodPage />} />
         <Route path="pharmacy" element={<PharmacyPage />} />
         <Route path="equipment" element={<EquipmentPage />} />
+        <Route path="ambulances" element={<AmbulancesPage />} />
         <Route path="operating-rooms" element={<OperatingRoomsPage />} />
         <Route path="operating-rooms/schedule" element={<OperatingRoomSchedulePage />} />
         <Route path="hospitals" element={<HospitalsPage />} />
