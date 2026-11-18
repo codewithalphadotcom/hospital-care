@@ -864,6 +864,9 @@ Notification = {
   id, is **404**.
 - **Audit.** Rows are not audit-logged: each copies an event that already is. Marking one read the first time writes
   `notification.read` (target: the notification). A repeat call changes nothing and writes nothing.
+- **Web UI (B07, #53).** The bell, the critical banners and the Alerts page poll the list (all, and `?unread=true`) and the count
+  every 30 seconds while the tab is visible, and once when it is shown again. A 401 or 403 stops polling. There is no read-all
+  endpoint: each alert is marked read on its own.
 - **Admin.** Read-only. Rows are written by `notify` and only `read_at` is set by the API.
 
 ## Demo data
