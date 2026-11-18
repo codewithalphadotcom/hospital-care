@@ -19,6 +19,7 @@ import type {
 } from '../api/emergencies'
 import { COMPONENTS, REQUIRED_TESTS, type BloodUnit, type BloodUnitInput, type ScreeningTest, type TestResult } from '../api/blood'
 import type { Equipment, EquipmentAction, EquipmentInput } from '../api/equipment'
+import type { Ambulance, AmbulanceAction, AmbulanceInput, AmbulanceType } from '../api/ambulances'
 import type {
   OperatingRoom,
   OperatingRoomAction,
@@ -34,6 +35,7 @@ import type { UserSummary } from '../api/users'
 import { applyAction } from '../features/beds/beds'
 import { actionsFor, nextStatus, STATUS_LABEL } from '../features/emergencies/emergencies'
 import { applyEquipmentAction } from '../features/equipment/equipment'
+import { applyAmbulanceAction } from '../features/ambulances/ambulances'
 import { applyOperatingRoomAction } from '../features/operatingRooms/operatingRooms'
 import { canEdit, canSee, type Module, type Role } from '../features/staff/roles'
 import { dateKey } from '../lib/time'
@@ -195,6 +197,23 @@ export function sampleEquipment(now: Date): Equipment[] {
     item(3, 'VENT-003', 'ventilator', 'maintenance', 'HDU'),
     item(4, 'DEFIB-001', 'defibrillator', 'available', 'Emergency department'),
     item(5, 'DIAL-001', 'dialysis', 'outOfService', 'Dialysis unit'),
+  ]
+}
+
+/** The hospital the mock's signed-in staff work at (userFor gives every staff member this one). */
+const HOME_HOSPITAL = 'CityCare General Hospital'
+
+/** A few ambulances across types and statuses, at two hospitals, in the order the server lists them (story #50). */
+export function sampleAmbulances(now: Date): Ambulance[] {
+  const at = now.toISOString()
+  const vehicle = (id: number, identifier: string, type: AmbulanceType, status: Ambulance['status'], hospital: string) =>
+    ({ id, identifier, type, status, statusSince: at, hospital }) satisfies Ambulance
+  return [
+    vehicle(1, 'AMB-01', 'advanced', 'available', HOME_HOSPITAL),
+    vehicle(2, 'AMB-02', 'basic', 'maintenance', HOME_HOSPITAL),
+    vehicle(3, 'AMB-03', 'patientTransport', 'available', HOME_HOSPITAL),
+    vehicle(4, 'AMB-04', 'advanced', 'outOfService', HOME_HOSPITAL),
+    vehicle(5, 'AMB-05', 'basic', 'available', 'Seaview Hospital'),
   ]
 }
 
@@ -509,6 +528,7 @@ export function mockStaffApi({
   }
 
   const equipment = sampleEquipment(now)
+  const ambulances = sampleAmbulances(now)
   const rooms = sampleOperatingRooms(now)
   const bookings = sampleOrBookings(now)
   const gate = (module: Module, reply: () => Reply): Route => () =>
@@ -873,6 +893,31 @@ export function mockStaffApi({
       }
       return ok(equipment[index])
     }),
+    // Staff see their own hospital's ambulances; admins see all of them (story #50).
+    'GET /ambulances/': view('ambulances', () => ok(role === 'admin' ? ambulances : ambulances.filter((a) => a.hospital === HOME_HOSPITAL))),
+    'POST /ambulances/': edit('ambulances', ({ body }) => {
+      const input = body as AmbulanceInput
+      // Admins name the base hospital; everyone else registers at their own, and a hospital id they send is ignored.
+      const hospital = role === 'admin' ? hospitals.find((h) => h.id === input.hospitalId)?.name : HOME_HOSPITAL
+      if (!hospital) return fail(400, { hospitalId: ['Pick the base hospital for this ambulance.'] })
+      const tag = input.identifier.trim().toUpperCase()
+      if (ambulances.some((a) => a.identifier === tag && a.hospital === hospital)) {
+        return fail(400, { identifier: ['This asset tag is already registered at this hospital.'] })
+      }
+      const created: Ambulance = { id: nextId++, identifier: tag, type: input.type, status: 'available', statusSince: now.toISOString(), hospital }
+      ambulances.push(created)
+      return { status: 201, body: created }
+    }),
+    'POST /ambulances/:id/actions/': edit('ambulances', ({ params, body }) => {
+      const index = ambulances.findIndex((a) => a.id === Number(params.id))
+      if (index < 0 || (role !== 'admin' && ambulances[index].hospital !== HOME_HOSPITAL)) return fail(404)
+      try {
+        ambulances[index] = applyAmbulanceAction(ambulances[index], (body as { action: AmbulanceAction }).action, new Date())
+      } catch (error) {
+        return fail(409, { detail: (error as Error).message })
+      }
+      return ok(ambulances[index])
+    }),
     'GET /operating-rooms/': view('operatingRooms', ({ query }) => {
       const capability = query.get('capability')
       const status = query.get('status')
@@ -989,5 +1034,5 @@ export function mockStaffApi({
       return { status: 204 }
     }),
   })
-  return { fetchMock, board, hospitals, users, cases }
+  return { fetchMock, board, hospitals, users, cases, ambulances }
 }

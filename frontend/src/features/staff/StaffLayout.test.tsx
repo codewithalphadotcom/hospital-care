@@ -74,6 +74,7 @@ describe('StaffLayout', () => {
       'Pharmacy',
       'Equipment',
       'Operating rooms',
+      'Ambulances',
       'Hospitals',
       'Users and roles',
     ])
@@ -126,6 +127,19 @@ describe('StaffLayout', () => {
     renderAt('/staff')
     await screen.findByText('overview content')
     expect(navLinks().includes('Operating rooms')).toBe(shown)
+  })
+
+  it.each([
+    ['admin', true],
+    ['doctor', true],
+    ['nurse', true],
+    ['bloodBank', false],
+    ['pharmacist', false],
+  ] as const)('shows Ambulances to %s: %s', async (role, shown) => {
+    mockStaffApi({ role })
+    renderAt('/staff')
+    await screen.findByText('overview content')
+    expect(navLinks().includes('Ambulances')).toBe(shown)
   })
 
   it('shows the hospital the signed-in user works at', async () => {

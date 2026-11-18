@@ -9,6 +9,7 @@ export type Module =
   | 'equipment'
   | 'operatingRooms'
   | 'orBookings'
+  | 'ambulances'
   | 'hospitals'
   | 'users'
 
@@ -29,6 +30,7 @@ export const MODULES: readonly { id: Module; label: string; path: string }[] = [
   { id: 'pharmacy', label: 'Pharmacy', path: '/staff/pharmacy' },
   { id: 'equipment', label: 'Equipment', path: '/staff/equipment' },
   { id: 'operatingRooms', label: 'Operating rooms', path: '/staff/operating-rooms' },
+  { id: 'ambulances', label: 'Ambulances', path: '/staff/ambulances' },
   { id: 'hospitals', label: 'Hospitals', path: '/staff/hospitals' },
   { id: 'users', label: 'Users and roles', path: '/staff/users' },
 ]
@@ -56,6 +58,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     equipment: 'edit',
     operatingRooms: 'edit',
     orBookings: 'edit',
+    ambulances: 'edit',
     hospitals: 'edit',
     users: 'edit',
   },
@@ -69,6 +72,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     equipment: 'view',
     operatingRooms: 'view',
     orBookings: 'edit', // surgeons book their own slots (story #29)
+    ambulances: 'view',
     hospitals: 'view',
   },
   nurse: {
@@ -80,6 +84,7 @@ const ACCESS: Record<Role, Partial<Record<Module, Access>>> = {
     equipment: 'edit',
     operatingRooms: 'edit',
     orBookings: 'edit',
+    ambulances: 'edit',
     hospitals: 'view',
   },
   bloodBank: { overview: 'view', emergencies: 'view', transfers: 'edit', blood: 'edit', hospitals: 'view' },
