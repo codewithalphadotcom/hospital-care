@@ -8,5 +8,4 @@ export const PLANNED: readonly { path: string; label: string; sprint: number; is
   { path: '/staff/ambulances', label: 'Ambulances', sprint: 8, issues: '#50–#51' },
   { path: '/staff/alerts', label: 'Alerts', sprint: 8, issues: '#52–#53' },
   { path: '/staff/command-centre', label: 'City command centre', sprint: 8, issues: '#55' },
-  { path: '/staff/audit', label: 'Audit log', sprint: 8, issues: '#56' },
 ]
