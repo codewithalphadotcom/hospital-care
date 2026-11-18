@@ -3,5 +3,4 @@
  * Each gets its real page, nav entry and access rule in the sprint shown; remove it from here then.
  */
 export const PLANNED: readonly { path: string; label: string; sprint: number; issues: string }[] = [
-  { path: '/staff/alerts', label: 'Alerts', sprint: 8, issues: '#52–#53' },
 ]

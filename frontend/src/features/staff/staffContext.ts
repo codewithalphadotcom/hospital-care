@@ -6,6 +6,7 @@ import type { EmergencyCase } from '../../api/emergencies'
 import type { Medicine } from '../../api/pharmacy'
 import type { PublicStatus } from '../../api/publicStatus'
 import type { Transfer } from '../../api/transfers'
+import type { NotificationFeed } from '../notifications/useNotificationFeed'
 import type { AttentionItem } from './attention'
 import type { Role } from './roles'
 
@@ -45,6 +46,8 @@ export interface StaffState {
   refreshFailed: boolean
   /** Attention items for the modules this role can see. */
   attention: AttentionItem[]
+  /** The user's notifications (B07, #53), polled every 30 seconds for the whole staff session. */
+  notifications: NotificationFeed
   /** Saves a bed status change on the server, then shows the bed as saved. */
   updateBed: (bedId: string, action: BedAction) => Promise<BedActionResult>
   /** Adds a newly registered unit, or updates an existing one by id (e.g. after a screening result), in the loaded data. */
